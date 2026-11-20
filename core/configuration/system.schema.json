@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/system-config.schema.json",
+  "title": "TEJAURA System Configuration Schema",
+  "description": "Strict configuration schema for core/configuration/system.json. Enforces human-owner sovereignty, non-self-approval, zero secrets in source/config, and L4 owner-exclusive gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "system",
+    "principles",
+    "governance",
+    "approvalGates",
+    "security",
+    "intelligence",
+    "modules"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON Schema meta-schema URI.",
+      "minLength": 1
+    },
+    "schemaVersion": {
+      "type": "string",
+      "description": "Semantic version of the system configuration schema.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "stage", "status", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "TEJAURA"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "stage": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "principles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "openSourceFirst",
+        "modelProviderAgnostic",
+        "phoneFirst",
+        "freeFirst",
+        "modularAndTestable"
+      ],
+      "properties": {
+        "openSourceFirst": { "type": "boolean" },
+        "modelProviderAgnostic": { "type": "boolean" },
+        "phoneFirst": { "type": "boolean" },
+        "freeFirst": { "type": "boolean" },
+        "modularAndTestable": { "type": "boolean" }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "humanOwnerControl",
+        "allowAgentSelfPermission",
+        "allowAgentSelfApproval",
+        "failClosedOnPolicyError",
+        "defaultAutonomyLevel",
+        "maxAutonomousLevel",
+        "autonomyLevels",
+        "documents"
+      ],
+      "properties": {
+        "humanOwnerControl": {
+          "type": "boolean",
+          "const": true,
+          "description": "Must always be true; human owner retains sovereign control."
+        },
+        "allowAgentSelfPermission": {
+          "type": "boolean",
+          "const": false,
+          "description": "Must always be false; agents cannot grant themselves permissions."
+        },
+        "allowAgentSelfApproval": {
+          "type": "boolean",
+          "const": false,
+          "description": "Must always be false; agents cannot approve their own actions."
+        },
+        "failClosedOnPolicyError": {
+          "type": "boolean",
+          "const": true,
+          "description": "Must always be true; malformed policy/config must deny access."
+        },
+        "defaultAutonomyLevel": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2"]
+        },
+        "maxAutonomousLevel": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2"],
+          "description": "Unattended autonomous ceiling cannot exceed L2."
+        },
+        "autonomyLevels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["L0", "L1", "L2", "L3", "L4"],
+          "properties": {
+            "L0": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "description"],
+              "properties": {
+                "id": { "type": "string", "const": "observe_only" },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            },
+            "L1": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "description"],
+              "properties": {
+                "id": { "type": "string", "const": "propose_only" },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            },
+            "L2": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "description"],
+              "properties": {
+                "id": { "type": "string", "const": "bounded_local" },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            },
+            "L3": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "description"],
+              "properties": {
+                "id": { "type": "string", "const": "supervised_action" },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            },
+            "L4": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "description"],
+              "properties": {
+                "id": { "type": "string", "const": "owner_exclusive" },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+        "documents": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["constitution", "identity", "permissionPolicy"],
+          "properties": {
+            "constitution": { "type": "string", "minLength": 1 },
+            "identity": { "type": "string", "minLength": 1 },
+            "permissionPolicy": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "approvalGates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "productionDeployments",
+        "paymentsAndBilling",
+        "publicPublishing",
+        "governanceModification",
+        "credentialAccess",
+        "destructiveActions"
+      ],
+      "properties": {
+        "productionDeployments": { "$ref": "#/$defs/ownerExclusiveGate" },
+        "paymentsAndBilling": { "$ref": "#/$defs/ownerExclusiveGate" },
+        "publicPublishing": { "$ref": "#/$defs/ownerExclusiveGate" },
+        "governanceModification": { "$ref": "#/$defs/ownerExclusiveGate" },
+        "credentialAccess": { "$ref": "#/$defs/ownerExclusiveGate" },
+        "destructiveActions": { "$ref": "#/$defs/ownerExclusiveGate" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowSecretsInSource",
+        "allowSecretsInConfig",
+        "credentialSource",
+        "defaultNetworkEgress",
+        "auditTrail"
+      ],
+      "properties": {
+        "allowSecretsInSource": {
+          "type": "boolean",
+          "const": false
+        },
+        "allowSecretsInConfig": {
+          "type": "boolean",
+          "const": false
+        },
+        "credentialSource": {
+          "type": "string",
+          "enum": ["environment-variables-only", "local-os-secret-store"]
+        },
+        "defaultNetworkEgress": {
+          "type": "string",
+          "enum": ["deny", "allowlist-only"]
+        },
+        "auditTrail": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "status"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "status": {
+              "type": "string",
+              "enum": ["planned", "implemented", "active"]
+            },
+            "directory": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "intelligence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modelRegistryPath",
+        "modelRegistryRulesPath",
+        "requireRegisteredModelsOnly",
+        "preferLocalOrFreeModels"
+      ],
+      "properties": {
+        "modelRegistryPath": { "type": "string", "minLength": 1 },
+        "modelRegistryRulesPath": { "type": "string", "minLength": 1 },
+        "requireRegisteredModelsOnly": { "type": "boolean" },
+        "preferLocalOrFreeModels": { "type": "boolean" }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "description"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["implemented-spec", "implemented", "planned"]
+          },
+          "description": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ownerExclusiveGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "autonomyLevel", "allowAutoApprove"],
+      "properties": {
+        "required": { "type": "boolean", "const": true },
+        "autonomyLevel": { "type": "string", "const": "L4" },
+        "allowAutoApprove": { "type": "boolean", "const": false }
+      }
+    }
+  }
+}

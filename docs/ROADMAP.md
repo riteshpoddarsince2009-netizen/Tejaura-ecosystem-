@@ -1,6 +1,6 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Milestone 1 — Core Contracts Complete (JSON Schemas, TypeScript Contracts, Fail-Closed Ajv Validator & Tests)  
+**Current Position:** Stage 1 — Configuration Validation & Core Policy Engine Complete  
 **Guiding Constraints:** Human-governed, open-source-first, model-provider agnostic, phone-first, free-first, modular, and testable.
 
 ---
@@ -19,7 +19,7 @@
 
 ---
 
-## Milestone 1 — Core Contracts & Validation Engine *(Current)*
+## Milestone 1 — Core Contracts & Validation Engine *(Complete)*
 **Status:** Implemented & Tested
 
 - [x] Define JSON Schema Draft 2020-12 contracts for `task`, `agent`, `tool`, `approval`, and `audit-event` (`contracts/schemas/`)
@@ -31,14 +31,15 @@
 
 ---
 
-## Stage 1 — Configuration Validation & Core Policy Engine *(Planned)*
-**Status:** Planned (Not Started)
+## Stage 1 — Configuration Validation & Core Policy Engine *(Current)*
+**Status:** Implemented & Tested
 
-- [ ] Build schema validators (TypeScript) for `system.json` and `models.json`
-- [ ] Implement deterministic Policy Evaluator (`L0`–`L4` enforcement, default-deny, fail-closed)
-- [ ] Implement non-self-approval gatekeeper state machine (pending -> approved/rejected -> expired)
-- [ ] Add local append-only audit log writer (free, file-based JSONL/SQLite)
-- [ ] Add unit tests proving agents cannot self-approve or escalate permissions
+- [x] Build JSON Schema Draft 2020-12 validators for `system.json` and `models.json` (`core/configuration/`, `intelligence/model-registry/`)
+- [x] Implement deterministic Policy Evaluator (`L0`–`L4` enforcement, default-deny, fail-closed, closed action catalog) (`core/policy/`)
+- [x] Implement non-self-approval gatekeeper state machine (`pending -> approved | rejected | expired`, single-use, environment-bound) (`core/approvals/`)
+- [x] Add local append-only JSONL audit log writer with secret redaction, directory confinement, and DI storage (`core/audit/`)
+- [x] Add automated security tests proving agents cannot self-approve, escalate permissions, or bypass audit failures (`core/tests/`)
+- [x] Document security model, trust boundaries, and limitations (`docs/SECURITY_MODEL.md`, module READMEs)
 
 ---
 

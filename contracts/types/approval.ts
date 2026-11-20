@@ -1,5 +1,11 @@
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
+export type ExecutionEnvironment =
+  | 'sandbox'
+  | 'local'
+  | 'staging'
+  | 'production';
+
 export interface ApprovalScope {
   resources: string[];
   permissions: string[];
@@ -18,5 +24,6 @@ export interface Approval {
   reviewed_at: string | null;
   reason: string;
   scope: ApprovalScope;
+  environment?: ExecutionEnvironment;
   schema_version?: string;
 }

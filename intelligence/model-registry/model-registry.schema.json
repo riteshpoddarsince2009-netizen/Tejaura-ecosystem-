@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/model-registry.schema.json",
+  "title": "TEJAURA Model Registry Schema",
+  "description": "Strict schema for intelligence/model-registry/models.json enforcing provider-agnostic metadata, zero secrets, and owner-controlled registration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "registryVersion",
+    "lastUpdated",
+    "policy",
+    "defaultModelId",
+    "providers",
+    "models"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "registryVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerAgnostic",
+        "openSourceFirst",
+        "freeFirst",
+        "allowSecretsInRegistry",
+        "requireExplicitOwnerRegistration"
+      ],
+      "properties": {
+        "providerAgnostic": { "type": "boolean", "const": true },
+        "openSourceFirst": { "type": "boolean" },
+        "freeFirst": { "type": "boolean" },
+        "allowSecretsInRegistry": { "type": "boolean", "const": false },
+        "requireExplicitOwnerRegistration": { "type": "boolean", "const": true }
+      }
+    },
+    "defaultModelId": {
+      "type": ["string", "null"],
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "providerType", "adapter", "enabled"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+          },
+          "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+          "providerType": {
+            "type": "string",
+            "enum": [
+              "local-open-source",
+              "self-hosted",
+              "free-cloud-tier",
+              "paid-api"
+            ]
+          },
+          "adapter": { "type": "string", "minLength": 2, "maxLength": 64 },
+          "endpoint": { "type": "string", "format": "uri" },
+          "apiKeyEnvVar": {
+            "type": ["string", "null"],
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "displayName",
+          "providerType",
+          "adapter",
+          "endpoint",
+          "apiKeyEnvVar",
+          "license",
+          "costTier",
+          "capabilities",
+          "contextWindow",
+          "maxAutonomyAllowed",
+          "enabled",
+          "addedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+          },
+          "displayName": { "type": "string", "minLength": 2, "maxLength": 120 },
+          "providerType": {
+            "type": "string",
+            "enum": [
+              "local-open-source",
+              "self-hosted",
+              "free-cloud-tier",
+              "paid-api"
+            ]
+          },
+          "adapter": { "type": "string", "minLength": 2, "maxLength": 64 },
+          "endpoint": { "type": "string", "format": "uri" },
+          "apiKeyEnvVar": {
+            "type": ["string", "null"],
+            "description": "Environment variable name holding the credential, or null for unauthenticated local models. Never a raw secret.",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "license": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "costTier": {
+            "type": "string",
+            "enum": ["free", "metered-low", "metered-high"]
+          },
+          "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 2, "maxLength": 64 }
+          },
+          "contextWindow": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxAutonomyAllowed": {
+            "type": "string",
+            "enum": ["L0", "L1", "L2", "L3"]
+          },
+          "enabled": { "type": "boolean" },
+          "addedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

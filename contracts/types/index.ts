@@ -5,7 +5,12 @@ export type {
   Agent,
 } from './agent.ts';
 export type { ToolCategory, ToolRiskLevel, Tool } from './tool.ts';
-export type { ApprovalStatus, ApprovalScope, Approval } from './approval.ts';
+export type {
+  ApprovalStatus,
+  ApprovalScope,
+  Approval,
+  ExecutionEnvironment,
+} from './approval.ts';
 export type {
   AuditActorType,
   AuditResourceType,
