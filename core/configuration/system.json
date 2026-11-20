@@ -109,7 +109,11 @@
     },
     "docs": {
       "status": "implemented-spec",
-      "description": "System architecture and staged development roadmap."
+      "description": "System architecture, contracts guide, and staged development roadmap."
+    },
+    "contracts": {
+      "status": "implemented",
+      "description": "JSON Schema Draft 2020-12 contracts, TypeScript types, fail-closed Ajv validator, and automated tests."
     },
     "runtime": {
       "status": "planned",

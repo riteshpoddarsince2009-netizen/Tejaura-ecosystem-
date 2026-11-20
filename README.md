@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Stage 0 — Foundational Repository & Governance Specification (Pre-Alpha)  
-> **Runtime Implementation:** Not yet implemented. This repository currently contains governance, identity, permission, configuration, architecture, and roadmap specifications only.
+> **Status:** Milestone 1 — Foundational Governance & Core Contracts Implemented (Pre-Alpha)  
+> **Runtime Implementation:** Runtime orchestrators, agents, model adapters, databases, and control-plane UI are **not yet implemented**. This repository currently contains governance specifications, system configuration, model registry baseline, Core Contracts (JSON Schemas + TypeScript types + Ajv validator + tests), and architecture docs.
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -35,19 +35,24 @@ To avoid ambiguity, TEJAURA strictly separates what exists today from what is pl
 - **Model Registry Specification:**
   - `intelligence/model-registry/README.md` — Rules and schema for registering model providers.
   - `intelligence/model-registry/models.json` — Empty, versioned model registry baseline.
+- **Core Contracts & Fail-Closed Validator (Milestone 1):**
+  - `contracts/schemas/*.schema.json` — JSON Schema Draft 2020-12 contracts for `task`, `agent`, `tool`, `approval`, and `audit-event`.
+  - `contracts/types/*.ts` — Strict TypeScript interfaces aligned with the JSON Schemas.
+  - `contracts/validation/validator.ts` — Fail-closed Ajv Draft 2020-12 (`ajv` + `ajv-formats`) validation engine.
+  - `contracts/tests/contracts.test.ts` — Automated contract and fail-closed validation test suite.
 - **Technical Documentation:**
   - `docs/ARCHITECTURE.md` — Modular target architecture and component boundaries.
+  - `docs/CONTRACTS.md` — Core Contracts specification, validation usage, extension guide, and versioning.
   - `docs/ROADMAP.md` — Staged development plan from foundation to operable OS.
 - **Repository Hygiene:**
   - `.gitignore` — Secure defaults preventing accidental exposure of secrets, keys, and local artifacts.
-  - Base web/Vite workspace scaffold (`package.json`, `index.html`, `src/`) left minimal until application build stages begin.
+  - Base web/Vite workspace scaffold (`package.json`, `index.html`, `src/`) preserved untouched until UI stages begin.
 
 ### Planned (Not Yet Implemented)
 - Policy enforcement engine and runtime permission evaluator
 - Human approval queue and mobile-first approval interface
 - Model provider adapter layer (local & remote inference connectors)
-- Task scheduler, sandboxed execution runtime, and audit log store
-- Automated test suites for policy validation, schema verification, and module contracts
+- Task scheduler, sandboxed execution runtime, and persistent audit log store
 
 ---
 
@@ -67,12 +72,19 @@ To avoid ambiguity, TEJAURA strictly separates what exists today from what is pl
 │   │   └── PERMISSION_POLICY.md                # Least-privilege rules and approval gates
 │   └── configuration/
 │       └── system.json                         # Initial validated system configuration
+├── contracts/
+│   ├── README.md                               # Core Contracts overview and usage
+│   ├── schemas/                                # JSON Schema Draft 2020-12 contracts
+│   ├── types/                                  # Strict TypeScript contract types
+│   ├── validation/                             # Fail-closed Ajv validation engine
+│   └── tests/                                  # Automated contract test suite
 ├── intelligence/
 │   └── model-registry/
 │       ├── README.md                           # Model registry rules and schema contract
 │       └── models.json                         # Empty versioned model registry
 └── docs/
     ├── ARCHITECTURE.md                         # Modular architecture specification
+    ├── CONTRACTS.md                            # Contracts reference and extension guide
     └── ROADMAP.md                              # Staged implementation roadmap
 ```
 
@@ -94,12 +106,19 @@ At this stage, setup consists of cloning the repository, configuring local envir
    ```bash
    cp .env.example .env
    ```
-2. **Validate JSON configuration files:**
+2. **Run contract tests, type checks, and build verification:**
    ```bash
-   node -e "JSON.parse(require('fs').readFileSync('core/configuration/system.json', 'utf8')); JSON.parse(require('fs').readFileSync('intelligence/model-registry/models.json', 'utf8')); console.log('JSON valid');"
+   npm install
+   npm test
+   npm run lint
+   npm run build
    ```
-3. **Read the governance documents before contributing:**
-   Review `core/constitution/TEJAURA_CONSTITUTION.md`, `core/permissions/PERMISSION_POLICY.md`, and `docs/ROADMAP.md` before proposing runtime modules.
+3. **Validate JSON configuration and contract schema files:**
+   ```bash
+   node -e "for (const f of ['core/configuration/system.json', 'intelligence/model-registry/models.json', 'contracts/schemas/task.schema.json', 'contracts/schemas/agent.schema.json', 'contracts/schemas/tool.schema.json', 'contracts/schemas/approval.schema.json', 'contracts/schemas/audit-event.schema.json']) { JSON.parse(require('fs').readFileSync(f, 'utf8')); } console.log('All JSON valid');"
+   ```
+4. **Read the governance documents before contributing:**
+   Review `core/constitution/TEJAURA_CONSTITUTION.md`, `core/permissions/PERMISSION_POLICY.md`, `docs/CONTRACTS.md`, and `docs/ROADMAP.md` before proposing runtime modules.
 
 ---
 
@@ -109,6 +128,7 @@ At this stage, setup consists of cloning the repository, configuring local envir
 - [TEJAURA Identity](core/identity/IDENTITY.md)
 - [Permission Policy](core/permissions/PERMISSION_POLICY.md)
 - [System Configuration](core/configuration/system.json)
+- [Core Contracts Guide](docs/CONTRACTS.md)
 - [Model Registry Rules](intelligence/model-registry/README.md)
 - [System Architecture](docs/ARCHITECTURE.md)
 - [Development Roadmap](docs/ROADMAP.md)

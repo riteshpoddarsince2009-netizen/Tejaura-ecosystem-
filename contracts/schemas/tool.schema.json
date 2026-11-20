@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/tool.schema.json",
+  "title": "TEJAURA Tool Contract",
+  "description": "Schema for a modular TEJAURA tool capability, its input/output schema references, permission scope, and risk level.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "description",
+    "category",
+    "input_schema_ref",
+    "output_schema_ref",
+    "permission_scope",
+    "risk_level",
+    "enabled"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique tool identifier.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name of the tool.",
+      "minLength": 2,
+      "maxLength": 100
+    },
+    "description": {
+      "type": "string",
+      "description": "Plain-language explanation of what the tool does and its side effects.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "category": {
+      "type": "string",
+      "description": "Functional category aligned with TEJAURA permission policy domains.",
+      "enum": [
+        "filesystem",
+        "governance",
+        "intelligence",
+        "network",
+        "deployment",
+        "billing",
+        "publishing",
+        "system",
+        "utility"
+      ]
+    },
+    "input_schema_ref": {
+      "type": "string",
+      "description": "URI or repository-relative reference to the tool's input JSON Schema.",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9._:/#-]{3,256}$"
+    },
+    "output_schema_ref": {
+      "type": "string",
+      "description": "URI or repository-relative reference to the tool's output JSON Schema.",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9._:/#-]{3,256}$"
+    },
+    "permission_scope": {
+      "type": "string",
+      "description": "Least-privilege capability scope required to invoke this tool (e.g., fs:read:workspace, model:invoke:local-llama).",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.:/-]*$"
+    },
+    "risk_level": {
+      "type": "string",
+      "description": "Risk classification governing review and approval gate requirements.",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the tool is enabled for policy-checked invocation."
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Optional semantic version of this tool contract.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  }
+}

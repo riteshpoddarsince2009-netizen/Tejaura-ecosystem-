@@ -55,7 +55,7 @@ TEJAURA defines five discrete autonomy levels (`L0`–`L4`). In initial configur
 | **L1** | `propose_only` | Propose Only *(Default)* | Drafts plans, code diffs, configurations, and action proposals without applying changes. | Explicit owner approval required to apply any proposal |
 | **L2** | `bounded_local` | Bounded Local *(Max Autonomous)* | Executes reversible, sandboxed local operations strictly inside pre-approved directories and resource quotas. | Pre-authorized by policy; logged for owner review |
 | **L3** | `supervised_action` | Supervised External | Invokes approved external APIs, non-destructive integrations, or staged workflows with real side effects. | Explicit per-action (or strictly time-bounded) owner approval |
-| **L4** | `owner_exclusive` | Owner Exclusive | Production deployments, payments, public publishing, credential access, and governance/policy edits. | **Strictly locked to human owner**; autonomous execution prohibited |
+| **L4** | `owner_exclusive` | Owner Exclusive | Production deployments, payments, public publishing, credential access, destructive actions, privilege grants, and governance/policy edits. | **Strictly locked to human owner**; autonomous execution prohibited |
 
 ### Level Enforcement Rules
 - **Default Posture:** All newly registered modules and agents start at `L0` or `L1`.

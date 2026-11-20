@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/approval.schema.json",
+  "title": "TEJAURA Approval Contract",
+  "description": "Schema for an explicit human-owner approval request and decision record enforcing non-self-approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "task_id",
+    "action",
+    "requested_by",
+    "requested_at",
+    "status",
+    "reviewed_by",
+    "reviewed_at",
+    "reason",
+    "scope"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique approval record identifier.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Identifier of the task awaiting or governed by this approval.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "action": {
+      "type": "string",
+      "description": "Explicit sensitive or gated action requiring owner authorization.",
+      "minLength": 2,
+      "maxLength": 256
+    },
+    "requested_by": {
+      "type": "string",
+      "description": "Identifier of the requesting agent or module.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "requested_at": {
+      "type": "string",
+      "description": "ISO 8601 / RFC 3339 UTC timestamp when approval was requested.",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "description": "Current decision state of the approval request.",
+      "enum": ["pending", "approved", "rejected", "expired"]
+    },
+    "reviewed_by": {
+      "type": ["string", "null"],
+      "description": "Identifier of the human owner who reviewed the request, or null if not yet reviewed. Must never be an agent or the requester.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "reviewed_at": {
+      "type": ["string", "null"],
+      "description": "ISO 8601 / RFC 3339 UTC timestamp when the owner reviewed the request, or null while pending.",
+      "format": "date-time"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Plain-language rationale explaining why approval is needed or why it was approved/rejected.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "scope": {
+      "type": "object",
+      "description": "Bounded least-privilege authorization scope granted if approved.",
+      "additionalProperties": false,
+      "required": ["resources", "permissions", "single_use"],
+      "properties": {
+        "resources": {
+          "type": "array",
+          "description": "Explicit target resource identifiers covered by this approval.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Explicit permission scopes covered by this approval.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.:/-]*$"
+          }
+        },
+        "single_use": {
+          "type": "boolean",
+          "description": "Whether this approval expires immediately after a single execution."
+        },
+        "expires_at": {
+          "type": ["string", "null"],
+          "description": "Optional ISO 8601 / RFC 3339 UTC expiration timestamp for time-bounded approvals.",
+          "format": "date-time"
+        }
+      }
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Optional semantic version of this approval contract.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  }
+}

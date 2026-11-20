@@ -18,7 +18,21 @@ This document defines TEJAURA's least-privilege access control model, capability
 
 ---
 
-## 2. Capability Scopes
+## 2. Autonomy Level Alignment
+
+All permission checks enforce the five constitutional autonomy levels defined in `TEJAURA_CONSTITUTION.md` and `system.json`:
+
+| Level | Identifier | Permission Ceiling |
+| :--- | :--- | :--- |
+| **L0** | `observe_only` | Read-only inspection; zero mutations or external side effects. |
+| **L1** | `propose_only` | Drafts plans and proposals only *(system default)*. |
+| **L2** | `bounded_local` | Reversible, sandboxed local actions within approved scopes *(max unattended level)*. |
+| **L3** | `supervised_action` | Approved external or side-effecting actions requiring explicit owner approval. |
+| **L4** | `owner_exclusive` | Permanently owner-locked; agents cannot hold `L4` or execute `L4` actions autonomously. |
+
+---
+
+## 3. Capability Scopes
 
 Future runtime modules must request capabilities using explicit, narrow scopes:
 
@@ -35,20 +49,21 @@ Future runtime modules must request capabilities using explicit, narrow scopes:
 
 ---
 
-## 3. Mandatory Owner Approval Gates (`L4` / Critical Actions)
+## 4. Mandatory Owner Approval Gates (`L4` / Critical Actions)
 
 The following actions **cannot** be auto-approved under any runtime profile and require explicit, recorded confirmation from the human owner:
 
 1. **Production Deployments:** Any action affecting live environments, DNS, production databases, or release channels.
 2. **Payments & Financial Actions:** Any monetary transfer, paid API tier activation, cloud resource purchase, or subscription change.
 3. **Public Publishing:** Publishing packages, posts, emails, web pages, or repository commits to public destinations.
-4. **Policy & Constitution Changes:** Editing `TEJAURA_CONSTITUTION.md`, `PERMISSION_POLICY.md`, or governance locks in `system.json`.
-5. **Privilege Grants:** Adding new scopes, raising an agent's autonomy level, or registering elevated external connectors.
-6. **Destructive Operations:** Recursive deletion, overwriting non-draft data, or clearing audit history.
+4. **Credential & Secret Access:** Reading, rotating, exporting, or referencing privileged authentication credentials or secrets.
+5. **Policy & Constitution Changes:** Editing `TEJAURA_CONSTITUTION.md`, `PERMISSION_POLICY.md`, or governance locks in `system.json`.
+6. **Privilege Grants:** Adding new scopes, raising an agent's autonomy level, or registering elevated external connectors.
+7. **Destructive Operations:** Recursive deletion, overwriting non-draft data, or clearing audit history.
 
 ---
 
-## 4. Approval Workflow Contract (Planned Runtime Behavior)
+## 5. Approval Workflow Contract (Planned Runtime Behavior)
 
 When a future runtime component encounters a gated action (`L3` or `L4`), it must execute the following sequence:
 
@@ -65,7 +80,7 @@ When a future runtime component encounters a gated action (`L3` or `L4`), it mus
 
 ---
 
-## 5. Secrets & Credentials Handling
+## 6. Secrets & Credentials Handling
 
 - Secrets and API keys must **never** appear in source code, `system.json`, `models.json`, logs, or Markdown docs.
 - Credentials may only be referenced by environment variable name (e.g., `PROVIDER_API_KEY`) or local OS secret store key at runtime.

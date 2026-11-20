@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/audit-event.schema.json",
+  "title": "TEJAURA Audit Event Contract",
+  "description": "Schema for an immutable, inspectable TEJAURA audit log event recording governance decisions, approvals, and execution outcomes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "timestamp",
+    "actor_type",
+    "actor_id",
+    "event_type",
+    "resource_type",
+    "resource_id",
+    "action",
+    "outcome",
+    "approval_id",
+    "metadata"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique audit event identifier.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO 8601 / RFC 3339 UTC timestamp when the event occurred.",
+      "format": "date-time"
+    },
+    "actor_type": {
+      "type": "string",
+      "description": "Category of the actor responsible for the event.",
+      "enum": ["owner", "agent", "system", "policy_engine", "adapter"]
+    },
+    "actor_id": {
+      "type": "string",
+      "description": "Unique identifier of the actor.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Dot-delimited or snake_case event classification (e.g., approval.requested, policy.denied).",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+    },
+    "resource_type": {
+      "type": "string",
+      "description": "Kind of TEJAURA resource targeted by the action.",
+      "enum": [
+        "task",
+        "agent",
+        "tool",
+        "approval",
+        "model",
+        "configuration",
+        "governance",
+        "system"
+      ]
+    },
+    "resource_id": {
+      "type": "string",
+      "description": "Identifier of the targeted resource.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "action": {
+      "type": "string",
+      "description": "Specific operation attempted or completed on the resource.",
+      "minLength": 2,
+      "maxLength": 128
+    },
+    "outcome": {
+      "type": "string",
+      "description": "Result of the audited operation.",
+      "enum": ["success", "failure", "denied", "pending", "cancelled"]
+    },
+    "approval_id": {
+      "type": ["string", "null"],
+      "description": "Linked approval record identifier when the event involves a gated action, or null otherwise.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Non-secret contextual metadata supporting audit inspection. Must never contain credentials, passwords, or API keys.",
+      "propertyNames": {
+        "not": {
+          "pattern": "^([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]([Kk][Ee][Yy]|_[Kk][Ee][Yy])?|[Aa][Pp][Ii]_?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss]_?[Tt][Oo][Kk][Ee][Nn]|[Rr][Ee][Ff][Rr][Ee][Ss][Hh]_?[Tt][Oo][Kk][Ee][Nn]|[Bb][Ee][Aa][Rr][Ee][Rr]_?[Tt][Oo][Kk][Ee][Nn]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]_?[Kk][Ee][Yy]|[Cc][Ll][Ii][Ee][Nn][Tt]_?[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?)$"
+        }
+      }
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Optional semantic version of this audit event contract.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  }
+}

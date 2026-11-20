@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/task.schema.json",
+  "title": "TEJAURA Task Contract",
+  "description": "Schema for a governed TEJAURA unit of work, its execution lifecycle, autonomy level, payload, and approval linkage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "type",
+    "title",
+    "description",
+    "status",
+    "autonomy_level",
+    "created_at",
+    "updated_at",
+    "requested_by",
+    "assigned_agent_id",
+    "input",
+    "result",
+    "error",
+    "approval_ids"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique task identifier.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "type": {
+      "type": "string",
+      "description": "Machine-readable task classification (snake_case or dot-delimited).",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+    },
+    "title": {
+      "type": "string",
+      "description": "Short human-readable task summary suitable for mobile approval views.",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed plain-language description of what the task intends to accomplish.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "status": {
+      "type": "string",
+      "description": "Current execution lifecycle state of the task.",
+      "enum": [
+        "queued",
+        "running",
+        "waiting_for_approval",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "autonomy_level": {
+      "type": "string",
+      "description": "TEJAURA constitutional autonomy level required for this task (L0=observe_only, L1=propose_only, L2=bounded_local, L3=supervised_action, L4=owner_exclusive).",
+      "enum": ["L0", "L1", "L2", "L3", "L4"]
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 / RFC 3339 UTC timestamp when the task was created.",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "ISO 8601 / RFC 3339 UTC timestamp of the most recent task state update.",
+      "format": "date-time"
+    },
+    "requested_by": {
+      "type": "string",
+      "description": "Identifier of the human owner or authorized actor that requested the task.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "assigned_agent_id": {
+      "type": ["string", "null"],
+      "description": "Identifier of the assigned agent, or null when unassigned.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "input": {
+      "type": "object",
+      "description": "Structured task input parameters. Must not contain raw credentials, passwords, tokens, or API keys.",
+      "propertyNames": {
+        "not": {
+          "pattern": "^([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]([Kk][Ee][Yy]|_[Kk][Ee][Yy])?|[Aa][Pp][Ii]_?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss]_?[Tt][Oo][Kk][Ee][Nn]|[Rr][Ee][Ff][Rr][Ee][Ss][Hh]_?[Tt][Oo][Kk][Ee][Nn]|[Bb][Ee][Aa][Rr][Ee][Rr]_?[Tt][Oo][Kk][Ee][Nn]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]_?[Kk][Ee][Yy]|[Cc][Ll][Ii][Ee][Nn][Tt]_?[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?)$"
+        }
+      }
+    },
+    "result": {
+      "type": ["object", "null"],
+      "description": "Structured task output when succeeded, or null otherwise. Must not contain credentials or secrets.",
+      "propertyNames": {
+        "not": {
+          "pattern": "^([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]([Kk][Ee][Yy]|_[Kk][Ee][Yy])?|[Aa][Pp][Ii]_?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss]_?[Tt][Oo][Kk][Ee][Nn]|[Rr][Ee][Ff][Rr][Ee][Ss][Hh]_?[Tt][Oo][Kk][Ee][Nn]|[Bb][Ee][Aa][Rr][Ee][Rr]_?[Tt][Oo][Kk][Ee][Nn]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]_?[Kk][Ee][Yy]|[Cc][Ll][Ii][Ee][Nn][Tt]_?[Ss][Ee][Cc][Rr][Ee][Tt]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]?)$"
+        }
+      }
+    },
+    "error": {
+      "type": ["object", "null"],
+      "description": "Structured failure information when status is failed, or null otherwise.",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Machine-readable error code.",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[A-Z0-9][A-Z0-9_]{1,63}$"
+        },
+        "message": {
+          "type": "string",
+          "description": "Plain-language explanation of the error without secret leakage.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether the failed task may safely be retried."
+        }
+      }
+    },
+    "approval_ids": {
+      "type": "array",
+      "description": "List of approval record IDs linked to this task (empty if no approval is required).",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 128,
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+      }
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Optional semantic version of this task contract.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  }
+}

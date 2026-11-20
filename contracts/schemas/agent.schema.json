@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/agent.schema.json",
+  "title": "TEJAURA Agent Contract",
+  "description": "Schema for a governed TEJAURA agent definition, capability ceiling, allowed tools, and model preferences.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "department",
+    "role",
+    "description",
+    "status",
+    "enabled",
+    "permitted_autonomy_level",
+    "allowed_tool_ids",
+    "preferred_model_ids",
+    "created_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique agent identifier.",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable display name of the agent.",
+      "minLength": 2,
+      "maxLength": 100
+    },
+    "department": {
+      "type": "string",
+      "description": "Functional domain or department to which the agent belongs.",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+    },
+    "role": {
+      "type": "string",
+      "description": "Concise functional role of the agent.",
+      "minLength": 2,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "description": "Plain-language explanation of the agent's responsibilities and boundaries.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "status": {
+      "type": "string",
+      "description": "Operational lifecycle state of the agent.",
+      "enum": ["active", "paused", "disabled", "retired"]
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the agent is currently permitted to accept tasks."
+    },
+    "permitted_autonomy_level": {
+      "type": "string",
+      "description": "Maximum TEJAURA autonomy level assignable to this agent (L0-L3 only; L4 is permanently owner-exclusive).",
+      "enum": ["L0", "L1", "L2", "L3"]
+    },
+    "allowed_tool_ids": {
+      "type": "array",
+      "description": "Explicit allowlist of registered tool IDs this agent may request or invoke.",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 128,
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+      }
+    },
+    "preferred_model_ids": {
+      "type": "array",
+      "description": "Ordered list of registered model IDs preferred for this agent (must reference intelligence/model-registry/models.json entries).",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 128,
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 / RFC 3339 UTC timestamp when the agent record was created.",
+      "format": "date-time"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Optional semantic version of this agent contract.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  }
+}

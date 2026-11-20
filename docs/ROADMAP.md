@@ -1,11 +1,11 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 0 — Foundation Complete (Documentation, Governance & Configuration Baseline)  
+**Current Position:** Milestone 1 — Core Contracts Complete (JSON Schemas, TypeScript Contracts, Fail-Closed Ajv Validator & Tests)  
 **Guiding Constraints:** Human-governed, open-source-first, model-provider agnostic, phone-first, free-first, modular, and testable.
 
 ---
 
-## Stage 0 — Foundational Repository & Governance *(Current)*
+## Stage 0 — Foundational Repository & Governance *(Complete)*
 **Status:** Implemented
 
 - [x] Establish repository overview and honest status reporting (`README.md`)
@@ -19,6 +19,18 @@
 
 ---
 
+## Milestone 1 — Core Contracts & Validation Engine *(Current)*
+**Status:** Implemented & Tested
+
+- [x] Define JSON Schema Draft 2020-12 contracts for `task`, `agent`, `tool`, `approval`, and `audit-event` (`contracts/schemas/`)
+- [x] Define aligned strict TypeScript contract interfaces (`contracts/types/`)
+- [x] Implement fail-closed Ajv Draft 2020-12 validation engine with `ajv-formats` (`contracts/validation/`)
+- [x] Add automated contract and fail-closed validation tests (`contracts/tests/contracts.test.ts`)
+- [x] Reconcile autonomy level definitions across `TEJAURA_CONSTITUTION.md`, `PERMISSION_POLICY.md`, and `system.json`
+- [x] Document contracts, usage, safe extension, and versioning (`contracts/README.md`, `docs/CONTRACTS.md`)
+
+---
+
 ## Stage 1 — Configuration Validation & Core Policy Engine *(Planned)*
 **Status:** Planned (Not Started)
 
@@ -26,7 +38,7 @@
 - [ ] Implement deterministic Policy Evaluator (`L0`–`L4` enforcement, default-deny, fail-closed)
 - [ ] Implement non-self-approval gatekeeper state machine (pending -> approved/rejected -> expired)
 - [ ] Add local append-only audit log writer (free, file-based JSONL/SQLite)
-- [ ] Add comprehensive unit tests proving agents cannot self-approve or escalate permissions
+- [ ] Add unit tests proving agents cannot self-approve or escalate permissions
 
 ---
 
