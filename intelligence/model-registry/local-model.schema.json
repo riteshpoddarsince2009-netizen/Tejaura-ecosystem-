@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/v1/local-model-registry.schema.json",
+  "title": "TEJAURA Local-First Model Registry Schema",
+  "description": "Strict schema for self-hosted, open-weight local models running on owner-controlled hardware or controlled compute nodes. Zero secrets permitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_version",
+    "last_updated",
+    "local_first_only",
+    "allow_paid_third_party_apis",
+    "allow_secrets",
+    "models"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "local_first_only": {
+      "type": "boolean",
+      "const": true
+    },
+    "allow_paid_third_party_apis": {
+      "type": "boolean",
+      "const": false
+    },
+    "allow_secrets": {
+      "type": "boolean",
+      "const": false
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/localModelEntry"
+      }
+    }
+  },
+  "$defs": {
+    "localModelEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_name",
+        "model_family",
+        "model_version",
+        "local_model_path",
+        "controlled_runtime_endpoint",
+        "runtime_type",
+        "capabilities",
+        "hardware_requirements",
+        "quantization",
+        "context_length",
+        "enabled",
+        "availability",
+        "license"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]{1,127}$"
+        },
+        "model_name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "model_family": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "local_model_path": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 512,
+          "not": {
+            "type": "string",
+            "pattern": "\\.\\."
+          }
+        },
+        "controlled_runtime_endpoint": {
+          "type": ["string", "null"],
+          "format": "uri",
+          "maxLength": 512
+        },
+        "runtime_type": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "llama_cpp",
+            "vllm",
+            "sglang",
+            "openai_compatible_local"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "text_generation",
+              "chat",
+              "code",
+              "reasoning",
+              "embeddings",
+              "vision",
+              "tool_calling",
+              "structured_output"
+            ]
+          }
+        },
+        "hardware_requirements": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "min_ram_mb",
+            "min_vram_mb",
+            "min_storage_mb",
+            "requires_gpu"
+          ],
+          "properties": {
+            "min_ram_mb": { "type": "integer", "minimum": 1 },
+            "min_vram_mb": { "type": "integer", "minimum": 0 },
+            "min_storage_mb": { "type": "integer", "minimum": 1 },
+            "requires_gpu": { "type": "boolean" },
+            "recommended_ram_mb": { "type": "integer", "minimum": 1 },
+            "recommended_vram_mb": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "quantization": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "context_length": {
+          "type": "integer",
+          "minimum": 128
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "availability": {
+          "type": "string",
+          "enum": ["available", "loading", "unavailable", "offline", "error"]
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "open_weight"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "spdx_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "open_weight": { "type": "boolean", "const": true },
+            "commercial_use_allowed": { "type": "boolean" }
+          }
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$"
+        }
+      },
+      "anyOf": [
+        { "required": ["local_model_path"], "properties": { "local_model_path": { "type": "string" } } },
+        { "required": ["controlled_runtime_endpoint"], "properties": { "controlled_runtime_endpoint": { "type": "string" } } }
+      ]
+    }
+  }
+}

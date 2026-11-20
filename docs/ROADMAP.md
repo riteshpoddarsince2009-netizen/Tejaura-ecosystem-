@@ -1,7 +1,7 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 1 — Configuration Validation & Core Policy Engine Complete  
-**Guiding Constraints:** Human-governed, open-source-first, model-provider agnostic, phone-first, free-first, modular, and testable.
+**Current Position:** Stage 2 — Local Model Infrastructure & Direct Model Connection Complete  
+**Guiding Constraints:** Human-governed, open-source-first, local-model-first, model-provider agnostic, phone-first, free-first, modular, and testable.
 
 ---
 
@@ -31,7 +31,7 @@
 
 ---
 
-## Stage 1 — Configuration Validation & Core Policy Engine *(Current)*
+## Stage 1 — Configuration Validation & Core Policy Engine *(Complete)*
 **Status:** Implemented & Tested
 
 - [x] Build JSON Schema Draft 2020-12 validators for `system.json` and `models.json` (`core/configuration/`, `intelligence/model-registry/`)
@@ -43,14 +43,17 @@
 
 ---
 
-## Stage 2 — Provider-Agnostic Intelligence Layer *(Planned)*
-**Status:** Planned (Not Started)
+## Stage 2 — Local Model Infrastructure & Direct Model Connection *(Current)*
+**Status:** Implemented & Tested
 
-- [ ] Define unified TypeScript `ModelAdapter` interface (provider-agnostic)
-- [ ] Implement free-first / local open-source adapter (e.g., Ollama / OpenAI-compatible local server)
-- [ ] Add safe environment-variable credential resolver (never reading/exposing secrets in prompts or configs)
-- [ ] Build model registry loader enforcing `enabled: true` and `costTier` guards
-- [ ] Add mock-adapter integration tests for offline CI verification
+- [x] Implement strict Draft 2020-12 Local Model Registry (`local_first_only: true`, `allow_paid_third_party_apis: false`, zero secrets, L4 owner-gated mutations) (`intelligence/model-registry/local-model*`)
+- [x] Implement provider-independent `RuntimeAdapter` & `RuntimeManager` for Ollama, llama.cpp, vLLM, SGLang, and OpenAI-compatible self-hosted servers (`intelligence/runtime/`)
+- [x] Enforce trusted endpoint allowlists, redirect denial, paid third-party API host blocking, timeouts, `AbortSignal` cancellation, and `untrusted_model_output` tagging (`intelligence/runtime/endpoint-guard.ts`)
+- [x] Build Hardware Abstraction (`ComputeNode`, `HardwareManager`, fail-closed `checkHardwareFit` for RAM, VRAM, storage, GPU, and runtime support) (`intelligence/hardware/`)
+- [x] Build Model Lifecycle Manager with availability checks, honest load/unload support reporting, bounded priority queue, concurrency limits, circuit breaker, and health-probe recovery (`intelligence/lifecycle/`)
+- [x] Build capability- and hardware-aware `ModelRouter` with zero paid third-party API fallback (`intelligence/router/`)
+- [x] Integrate `PolicyEvaluator`, `ApprovalService`, and `AuditLogger` for `runtime:manage`, `model:download`, `model:load`/`unload`, `model:discover`, `model:invoke_local`, and `model:registry_write`
+- [x] Add mock HTTP server & security tests (`intelligence/tests/`) and Stage 2 architecture documentation (`docs/LOCAL_MODELS.md`)
 
 ---
 

@@ -1,9 +1,11 @@
 # TEJAURA Model Registry
 
 **Registry Schema Version:** 1.0.0  
-**Current State:** Empty baseline (`models.json` contains `0` registered models; runtime model adapters are **planned**, not yet implemented).
+**Current State:**
+- **Stage 1 Baseline (`models.json` / `model-registry.schema.json`):** Validated empty baseline (`0` registered models).
+- **Stage 2 Local-First Registry (`local-models.json` / `local-model.schema.json` / `local-model-registry.ts`):** Implemented & tested strict schema and L4 owner-gated runtime registry for self-hosted open-weight models (`local_first_only: true`, `allow_paid_third_party_apis: false`, `allow_secrets: false`).
 
-The TEJAURA Model Registry provides a single, versioned, provider-agnostic catalog of AI models approved by the human owner for use within the system.
+The TEJAURA Model Registry provides a single, versioned, provider-agnostic catalog of AI models approved by the human owner for use within the system. See `docs/LOCAL_MODELS.md` for Stage 2 runtime, hardware, and routing details.
 
 ---
 

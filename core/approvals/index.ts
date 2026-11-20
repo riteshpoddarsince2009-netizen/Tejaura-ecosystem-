@@ -1,6 +1,7 @@
 export {
   ApprovalService,
   InMemoryApprovalStore,
+  toContractApproval,
 } from './approval-service.ts';
 
 export type {

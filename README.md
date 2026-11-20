@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Milestone 1 — Foundational Governance & Core Contracts Implemented (Pre-Alpha)  
-> **Runtime Implementation:** Runtime orchestrators, agents, model adapters, databases, and control-plane UI are **not yet implemented**. This repository currently contains governance specifications, system configuration, model registry baseline, Core Contracts (JSON Schemas + TypeScript types + Ajv validator + tests), and architecture docs.
+> **Status:** Stage 2 — Core Governance, Policy Engine & Local Model Infrastructure Implemented (Pre-Alpha)  
+> **Runtime Implementation:** Autonomous agents, sandboxed task execution, and the phone-first control-plane UI are **not yet implemented**. Implemented today: governance specifications, system/registry config validators, Core Contracts, deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, and Stage 2 Local Model Infrastructure (Local Model Registry, Hardware Abstraction, direct Runtime Adapters for Ollama/llama.cpp/vLLM/SGLang/compatible servers, Lifecycle Manager, and Model Router).
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -40,19 +40,32 @@ To avoid ambiguity, TEJAURA strictly separates what exists today from what is pl
   - `contracts/types/*.ts` — Strict TypeScript interfaces aligned with the JSON Schemas.
   - `contracts/validation/validator.ts` — Fail-closed Ajv Draft 2020-12 (`ajv` + `ajv-formats`) validation engine.
   - `contracts/tests/contracts.test.ts` — Automated contract and fail-closed validation test suite.
+- **Stage 1 Governance Engine (`core/`):**
+  - `core/configuration/` — Draft 2020-12 system config validator (`validate-system-config.ts`).
+  - `core/policy/` — Fail-closed `L0`–`L4` Policy Evaluator (`policy-evaluator.ts`).
+  - `core/approvals/` — Non-self-approval gatekeeper (`approval-service.ts`).
+  - `core/audit/` — Append-only JSONL Audit Logger with secret redaction (`audit-logger.ts`).
+- **Stage 2 Local Model Infrastructure (`intelligence/`):**
+  - `intelligence/model-registry/` — Local open-weight model registry (`local-model.schema.json`, `local-models.json`, `local-model-registry.ts`) plus Stage 1 `models.json` validator.
+  - `intelligence/hardware/` — `HardwareManager` & `checkHardwareFit` for RAM, VRAM, storage, GPU, and runtime compatibility.
+  - `intelligence/runtime/` — `RuntimeManager`, trusted endpoint guard, and direct adapters for Ollama, llama.cpp, vLLM, SGLang, and compatible local servers.
+  - `intelligence/lifecycle/` — `ModelLifecycleManager` (availability, honest load/unload, priority queue, concurrency limits, circuit breaker & recovery).
+  - `intelligence/router/` — `ModelRouter` (capability/hardware/context routing with zero paid API fallback).
+  - `intelligence/tests/` — Mock HTTP server, hardware, lifecycle, routing, and security tests.
 - **Technical Documentation:**
   - `docs/ARCHITECTURE.md` — Modular target architecture and component boundaries.
   - `docs/CONTRACTS.md` — Core Contracts specification, validation usage, extension guide, and versioning.
+  - `docs/SECURITY_MODEL.md` — Stage 1 security architecture and trust boundaries.
+  - `docs/LOCAL_MODELS.md` — Stage 2 local-model-first architecture, runtime matrix, and setup.
   - `docs/ROADMAP.md` — Staged development plan from foundation to operable OS.
 - **Repository Hygiene:**
   - `.gitignore` — Secure defaults preventing accidental exposure of secrets, keys, and local artifacts.
   - Base web/Vite workspace scaffold (`package.json`, `index.html`, `src/`) preserved untouched until UI stages begin.
 
 ### Planned (Not Yet Implemented)
-- Policy enforcement engine and runtime permission evaluator
-- Human approval queue and mobile-first approval interface
-- Model provider adapter layer (local & remote inference connectors)
-- Task scheduler, sandboxed execution runtime, and persistent audit log store
+- Phone-first owner control plane UI (`L3`/`L4` approval inbox & status inspector)
+- Sandboxed `L2` task execution runtime and modular skills
+- Autonomous agent orchestration loops (bounded by owner governance)
 
 ---
 
@@ -129,6 +142,8 @@ At this stage, setup consists of cloning the repository, configuring local envir
 - [Permission Policy](core/permissions/PERMISSION_POLICY.md)
 - [System Configuration](core/configuration/system.json)
 - [Core Contracts Guide](docs/CONTRACTS.md)
+- [Security Model](docs/SECURITY_MODEL.md)
+- [Local Model Infrastructure](docs/LOCAL_MODELS.md)
 - [Model Registry Rules](intelligence/model-registry/README.md)
 - [System Architecture](docs/ARCHITECTURE.md)
 - [Development Roadmap](docs/ROADMAP.md)

@@ -24,7 +24,7 @@ function cloneRecord(record: ApprovalRecord): ApprovalRecord {
   };
 }
 
-function toContractApproval(record: ApprovalRecord): Approval {
+export function toContractApproval(record: ApprovalRecord): Approval {
   const { consumed_at: _consumedAt, consumed_for_task_id: _consumedTask, ...approval } =
     record;
   return approval;
