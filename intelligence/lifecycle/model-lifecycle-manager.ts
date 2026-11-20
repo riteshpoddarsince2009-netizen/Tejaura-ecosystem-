@@ -128,6 +128,29 @@ export class ModelLifecycleManager {
       };
     }
 
+    if (model.compatibility_status !== 'verified') {
+      return {
+        available: false,
+        model_id: modelId,
+        status: 'unavailable',
+        code:
+          model.compatibility_status === 'unsupported'
+            ? 'MODEL_COMPATIBILITY_UNSUPPORTED'
+            : 'MODEL_COMPATIBILITY_UNTESTED',
+        reason: `Model "${modelId}" has compatibility_status "${model.compatibility_status}" and cannot be used for inference.`,
+      };
+    }
+
+    if (model.modality !== 'text') {
+      return {
+        available: false,
+        model_id: modelId,
+        status: 'unavailable',
+        code: 'UNSUPPORTED_AIRLLM_MODALITY',
+        reason: `Model "${modelId}" modality "${model.modality}" is disabled until a verified execution path exists.`,
+      };
+    }
+
     const breaker = this.getBreakerState(modelId);
     if (breaker.circuit_open) {
       return {
@@ -275,6 +298,29 @@ export class ModelLifecycleManager {
       };
     }
 
+    if (model.compatibility_status !== 'verified') {
+      return {
+        ok: false,
+        model_id: modelId,
+        code:
+          model.compatibility_status === 'unsupported'
+            ? 'MODEL_COMPATIBILITY_UNSUPPORTED'
+            : 'MODEL_COMPATIBILITY_UNTESTED',
+        message: `Refusing to load "${modelId}": compatibility_status is "${model.compatibility_status}".`,
+        policy,
+      };
+    }
+
+    if (model.modality !== 'text') {
+      return {
+        ok: false,
+        model_id: modelId,
+        code: 'UNSUPPORTED_AIRLLM_MODALITY',
+        message: `Refusing to load "${modelId}": modality "${model.modality}" is unsupported.`,
+        policy,
+      };
+    }
+
     const hwCheck = this.hardware.findBestCompatibleNode(model);
     if (!hwCheck.fit.fits) {
       return {
@@ -299,12 +345,28 @@ export class ModelLifecycleManager {
       };
     }
 
+    const compression =
+      model.quantization === '4bit' || model.quantization === '8bit'
+        ? model.quantization
+        : null;
+
     this.registry.updateAvailability(modelId, 'loading');
     const result = await this.runtime.loadModel(
       model.runtime_type,
       model.controlled_runtime_endpoint,
       model.model_name,
-      { timeoutMs },
+      {
+        timeoutMs,
+        metadata: {
+          model_id: model.model_id,
+          repo_id: model.model_repository.repo_id,
+          revision: model.model_repository.revision,
+          local_model_path: model.local_model_path,
+          compatibility_status: model.compatibility_status,
+          modality: model.modality,
+          compression,
+        },
+      },
     );
 
     if (!result.supported) {

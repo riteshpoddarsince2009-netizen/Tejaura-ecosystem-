@@ -1,0 +1,15 @@
+# TEJAURA AirLLM Worker Python Dependencies
+# Install manually inside an isolated virtual environment on owner-controlled compute:
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r workers/airllm/requirements.txt
+#
+# Never install or run this worker on the Android phone control device for large LLMs.
+
+airllm>=2.11.0
+torch>=2.1.0
+transformers>=4.40.0
+accelerate>=0.29.0
+safetensors>=0.4.2
+
+# Optional: 4-bit / 8-bit block-wise weight compression (compression="4bit" | "8bit")
+# bitsandbytes>=0.43.0

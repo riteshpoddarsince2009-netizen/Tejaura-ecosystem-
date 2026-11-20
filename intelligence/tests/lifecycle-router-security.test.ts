@@ -47,9 +47,16 @@ function makeModel(
     model_name: id,
     model_family: 'qwen2.5',
     model_version: '1.0.0',
+    model_repository: {
+      repo_id: `Qwen/${id}`,
+      revision: 'main',
+      source: 'huggingface',
+    },
     local_model_path: `models/${id}.gguf`,
     controlled_runtime_endpoint: endpoint,
     runtime_type: 'ollama',
+    compatibility_status: 'verified',
+    modality: 'text',
     capabilities: ['chat', 'text_generation', 'code'],
     hardware_requirements: {
       min_ram_mb: 8192,

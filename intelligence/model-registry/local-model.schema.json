@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://tejaura.org/schemas/v1/local-model-registry.schema.json",
   "title": "TEJAURA Local-First Model Registry Schema",
-  "description": "Strict schema for self-hosted, open-weight local models running on owner-controlled hardware or controlled compute nodes. Zero secrets permitted.",
+  "description": "Strict schema for self-hosted, open-weight local models (AirLLM primary runtime) running on owner-controlled hardware or controlled compute nodes. Zero secrets permitted.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -26,6 +26,10 @@
     "last_updated": {
       "type": "string",
       "format": "date-time"
+    },
+    "preferred_runtime": {
+      "type": "string",
+      "const": "airllm"
     },
     "local_first_only": {
       "type": "boolean",
@@ -55,9 +59,12 @@
         "model_name",
         "model_family",
         "model_version",
+        "model_repository",
         "local_model_path",
         "controlled_runtime_endpoint",
         "runtime_type",
+        "compatibility_status",
+        "modality",
         "capabilities",
         "hardware_requirements",
         "quantization",
@@ -88,6 +95,27 @@
           "minLength": 1,
           "maxLength": 64
         },
+        "model_repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repo_id", "revision", "source"],
+          "properties": {
+            "repo_id": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 256
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "source": {
+              "type": "string",
+              "enum": ["huggingface", "local_mirror", "owner_archive"]
+            }
+          }
+        },
         "local_model_path": {
           "type": ["string", "null"],
           "minLength": 1,
@@ -105,12 +133,21 @@
         "runtime_type": {
           "type": "string",
           "enum": [
+            "airllm",
             "ollama",
             "llama_cpp",
             "vllm",
             "sglang",
             "openai_compatible_local"
           ]
+        },
+        "compatibility_status": {
+          "type": "string",
+          "enum": ["verified", "untested", "unsupported"]
+        },
+        "modality": {
+          "type": "string",
+          "enum": ["text", "multimodal_vision", "image_generation", "audio"]
         },
         "capabilities": {
           "type": "array",
@@ -172,7 +209,12 @@
             "name": { "type": "string", "minLength": 1, "maxLength": 120 },
             "spdx_id": { "type": "string", "minLength": 1, "maxLength": 64 },
             "open_weight": { "type": "boolean", "const": true },
-            "commercial_use_allowed": { "type": "boolean" }
+            "commercial_use_allowed": { "type": "boolean" },
+            "source_url": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 512
+            }
           }
         },
         "node_id": {
@@ -185,6 +227,21 @@
       "anyOf": [
         { "required": ["local_model_path"], "properties": { "local_model_path": { "type": "string" } } },
         { "required": ["controlled_runtime_endpoint"], "properties": { "controlled_runtime_endpoint": { "type": "string" } } }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": { "const": true }
+            }
+          },
+          "then": {
+            "properties": {
+              "compatibility_status": { "const": "verified" },
+              "modality": { "const": "text" }
+            }
+          }
+        }
       ]
     }
   }

@@ -1,80 +1,65 @@
-# TEJAURA Local Model Infrastructure (Stage 2)
+# TEJAURA Local Model & AirLLM Infrastructure (Stage 2A)
 
-**Status:** Implemented & Tested (`intelligence/`)  
-**Architectural Principle:** Local-model-first, self-hosted open-weight models only. TEJAURA does **not** fall back to paid third-party AI APIs.
-
----
-
-## 1. Local-Model-First Architecture
-
-Stage 2 implements a direct, provider-independent inference layer connecting strictly to owner-controlled local or owner-hosted compute runtimes:
-
-1. **Local Model Registry (`intelligence/model-registry/`):**
-   - `local-model.schema.json` (JSON Schema Draft 2020-12) and `local-model-registry.ts` enforce `local_first_only: true`, `allow_paid_third_party_apis: false`, `allow_secrets: false`, and `open_weight: true`.
-   - Every model declares `model_id`, `model_name`, `model_family`, `model_version`, `local_model_path` and/or `controlled_runtime_endpoint`, `runtime_type`, `capabilities`, `hardware_requirements`, `quantization`, `context_length`, `enabled`, `availability`, and `license`.
-   - Registry mutations (`registerModel`, `setEnabled`) require `L4` owner-exclusive authorization via `PolicyEvaluator` + `AuditLogger`.
-
-2. **Hardware Abstraction (`intelligence/hardware/`):**
-   - `HardwareManager` models owner-controlled `ComputeNode` instances (`local`, `lan`, `owner_remote`) with explicit RAM, VRAM, storage, GPU presence, supported runtimes, and installed model IDs.
-   - `checkHardwareFit` fails closed: a model never routes or loads unless the target node is online, supports the model's `runtime_type`, meets `requires_gpu`, and has sufficient free VRAM, RAM, and storage headroom.
-
-3. **Runtime Manager & Direct Adapters (`intelligence/runtime/`):**
-   - Connects directly via HTTP without external SDK dependencies to self-hosted inference servers.
-   - Enforces `endpoint-guard.ts` (`resolveTrustedEndpoint`, `validateControlledEndpointUrl`) on every request:
-     - Only owner-registered trusted endpoints are allowed.
-     - Arbitrary URLs (including URLs produced inside model output) are rejected.
-     - Known commercial AI API hosts (OpenAI, Anthropic, Google Gemini, Groq, etc.) and embedded URL credentials are blocked.
-     - Non-loopback/non-private remote endpoints require `https://`.
-     - HTTP redirects are rejected (`redirect: 'error'`).
-   - All inference calls enforce request timeouts and caller `AbortSignal` cancellation, and tag all returned completions with `untrusted_model_output: true`.
-
-4. **Model Lifecycle Manager (`intelligence/lifecycle/`):**
-   - Performs availability checks combining registry status, circuit-breaker state, hardware fit, and optional live runtime health/discovery probes.
-   - Manages global and per-model concurrency limits with a bounded priority queue (`high`, `normal`, `low`).
-   - Tracks consecutive runtime failures per model, opens a circuit breaker upon reaching the failure threshold, and recovers only after a passing runtime health check and hardware check.
-   - Authorizes model load/unload (`L2`) and model download gates (`L3` with explicit owner approval) without ever initiating unapproved automatic large downloads.
-
-5. **Model Router (`intelligence/router/`):**
-   - Deterministically scores enabled, available, circuit-healthy models against required `capabilities`, `min_context_length`, memory budgets, `checkHardwareFit`, priority, and concurrency capacity.
-   - If no eligible local model qualifies, returns `decision: 'unavailable'` with detailed per-model rejection codes (`CAPABILITY_MISMATCH`, `CONTEXT_LENGTH_INSUFFICIENT`, `INSUFFICIENT_VRAM`, `NODE_OFFLINE`, etc.) or `decision: 'queued'` when at concurrency capacity. **Never falls back to paid third-party AI APIs.**
+**Status:**
+- **Implemented & Tested (Offline / Mock Worker):** Local Model Registry (`verified`-only enablement), Hardware Abstraction, `AirLlmRuntimeAdapter` + `RuntimeManager`, isolated Python AirLLM Worker Protocol (`MockAirLlmEngine`), `ModelLifecycleManager`, `ModelRouter` (`airllm` primary), and secondary adapters (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local).
+- **Implemented, Not Yet Live-GPU Verified:** `RealAirLlmEngine` (`workers/airllm/airllm_engine.py`) wrapping `airllm.AutoModel.from_pretrained(...)` and `model.generate(...)` — verified against official `lyogavin/airllm` documentation, but not executed against physical GPU/weights in CI.
+- **Disabled / Not Supported:** Image-generation models, audio models, and unverified multimodal vision paths remain disabled until separately verified execution paths exist.
 
 ---
 
-## 2. Supported Runtimes & Feature Matrix
+## 1. Architecture: Phone Control + Owner Compute + AirLLM Primary
 
-TEJAURA does not assume every self-hosted inference server exposes identical HTTP management endpoints:
-
-| Runtime (`runtime_type`) | Health Check | Model Discovery | Chat Inference | HTTP Load / Unload | Cancellation & Timeout |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `ollama` | Yes (`GET /api/tags`) | Yes (`GET /api/tags`) | Yes (`POST /api/chat`) | **Yes** (`POST /api/generate` `keep_alive`) | Yes (`AbortSignal`) |
-| `llama_cpp` | Yes (`GET /health`) | Yes (`GET /v1/models`) | Yes (`POST /v1/chat/completions`) | **No** (returns `UNSUPPORTED_RUNTIME_OPERATION`) | Yes (`AbortSignal`) |
-| `vllm` | Yes (`GET /health`) | Yes (`GET /v1/models`) | Yes (`POST /v1/chat/completions`) | **No** (returns `UNSUPPORTED_RUNTIME_OPERATION`) | Yes (`AbortSignal`) |
-| `sglang` | Yes (`GET /health`) | Yes (`GET /v1/models` + `/get_model_info`) | Yes (`POST /v1/chat/completions`) | **No** (returns `UNSUPPORTED_RUNTIME_OPERATION`) | Yes (`AbortSignal`) |
-| `openai_compatible_local` | Yes (`GET /v1/models`) | Yes (`GET /v1/models`) | Yes (`POST /v1/chat/completions`) | **No** (returns `UNSUPPORTED_RUNTIME_OPERATION`) | Yes (`AbortSignal`) |
-
-For runtimes that bind a single model at process launch (`llama_cpp`, `vllm`, `sglang`, `openai_compatible_local`), TEJAURA never fakes HTTP model loading; process lifecycle changes must go through an owner-approved `runtime:manage` (`L3`) workflow.
+- **Control Device (Android Phone):** Dispatches tasks, inspects system status, and grants `L3`/`L4` owner approvals. Never hosts large-model weights or heavy LLM inference.
+- **Primary Inference Engine (`airllm`):** Runs inside an isolated Python worker service (`workers/airllm/`) on owner-controlled local or remote compute (`localhost`, LAN GPU box, or owner HTTPS node).
+- **TypeScript Core Isolation:** `intelligence/` communicates with the Python worker strictly over an authenticated internal HTTP protocol (`X-TEJAURA-Worker-Token`), keeping `torch`, `transformers`, `accelerate`, `safetensors`, `bitsandbytes`, and `airllm` completely out of the Node/Bun/Vite runtime.
+- **No Paid Third-Party AI API Fallback:** If no verified local model fits hardware and capabilities, `ModelRouter` returns `unavailable` (or `queued` if busy) and never falls back to paid cloud APIs.
 
 ---
 
-## 3. Security Boundaries
+## 2. Official AirLLM Verification & Operational Realities
 
-- **Prompt-Injection Containment:** Model responses are returned strictly as untrusted data (`untrusted_model_output: true`). Model output cannot register models, add runtime endpoints, grant permissions, approve requests, or modify `core/configuration/system.json`.
-- **Policy Integration:**
-  - `model:discover` (`L0`), `model:load` (`L2`), `model:unload` (`L2`), `model:invoke_local` (`L2`)
-  - `runtime:manage` (`L3`, requires explicit human owner approval via `ApprovalService`)
-  - `model:download` (`L3`, requires explicit human owner approval via `ApprovalService`)
-  - `model:registry_write` (`L4`, owner-exclusive)
-- **Zero Secrets:** `local-model-registry.ts` recursively rejects secret-like property names and embedded URL credentials.
+Based on the official `lyogavin/airllm` repository and documentation:
+
+- **Dependencies:** `airllm`, `torch`, `transformers`, `accelerate`, `safetensors` (plus optional `bitsandbytes` for `compression="4bit"` / `"8bit"`).
+- **API Interface:** `from airllm import AutoModel` -> `AutoModel.from_pretrained(path_or_repo, compression=..., layer_shards_saving_path=...)` -> `model.tokenizer` + `model.generate(...)`.
+- **Supported Architectures (Upstream Claims):** Dense and MoE transformer LLMs with standard safetensors layouts (e.g., Llama 2/3/3.1/3.3, Qwen 1.5/2/2.5/3, DeepSeek-V2/V3/R1, Mistral/Mixtral, Phi, Gemma). **Important:** TEJAURA does **not** assume every model in these families works on your node—each registered model must carry an explicit `compatibility_status` (`verified` | `untested` | `unsupported`).
+- **Critical Limitations:**
+  1. **Sequential Layer Streaming Latency:** Reading layers from SSD/NVMe per generated token makes inference markedly slower than full-VRAM serving (seconds to minutes per token for massive 70B+ models on slower disks).
+  2. **Disk Overhead:** AirLLM splits and stores per-layer shards on disk (`layer_shards_saving_path` / HF cache), requiring free storage equal to or exceeding model size.
+  3. **No Automatic Downloads:** `RealAirLlmEngine` disables automatic hub downloads (`allow_remote_hub_download=False`) and expects pre-staged weights at `local_model_path`. Model downloads remain gated behind `L3` `model:download` owner approval.
 
 ---
 
-## 4. Local Setup Summary
+## 3. Registry & Compatibility Enforcement
 
-1. Install and start a self-hosted inference server on hardware you control, for example:
-   - **Ollama:** `ollama serve` on `http://127.0.0.1:11434`
-   - **llama.cpp:** `llama-server -m ./models/model.gguf --host 127.0.0.1 --port 8080`
-   - **vLLM:** `vllm serve <open-weight-model> --host 127.0.0.1 --port 8000`
-   - **SGLang:** `python -m sglang.launch_server --model-path <open-weight-model> --host 127.0.0.1 --port 30000`
-2. Register the node in `HardwareManager` with verified RAM, VRAM, and disk headroom.
-3. Register the trusted endpoint in `RuntimeManager` (`runtime:manage` approval) and the model metadata in `LocalModelRegistry` (`L4` owner action).
-4. Route tasks through `ModelRouter` and `ModelLifecycleManager`.
+Every model entry in `intelligence/model-registry/local-model.schema.json` requires:
+- `model_repository`: `{ repo_id, revision, source }`
+- `runtime_type`: `"airllm"` (primary) or secondary local runtime
+- `compatibility_status`: `"verified"` | `"untested"` | `"unsupported"`
+- `modality`: `"text"` (enabled) | `"multimodal_vision"` | `"image_generation"` | `"audio"` (disabled)
+- `capabilities`, `quantization`, `hardware_requirements` (`min_ram_mb`, `min_vram_mb`, `min_storage_mb`, `requires_gpu`), `license` (`open_weight: true`), `local_model_path`, `controlled_runtime_endpoint`, `enabled`, `availability`.
+
+**Fail-Closed Rules:**
+1. Only `compatibility_status: "verified"` and `modality: "text"` models may be set `enabled: true` in `LocalModelRegistry`.
+2. `ModelLifecycleManager`, `ModelRouter`, `AirLlmRuntimeAdapter`, and the Python worker each independently reject `untested`, `unsupported`, and non-`text` requests.
+
+---
+
+## 4. Runtime Feature Matrix
+
+| Runtime (`runtime_type`) | Role | Health | Discovery | Chat/Text Infer | Load / Unload | Cancellation |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `airllm` | **Primary** | `/internal/health` | `/internal/models` | `/internal/infer` | **Yes** (`AutoModel` load & GC/CUDA release) | Cooperative token/deadline + `/internal/requests/cancel` |
+| `ollama` | Secondary | `/api/tags` | `/api/tags` | `/api/chat` | **Yes** (`keep_alive`) | HTTP `AbortSignal` |
+| `llama_cpp` | Secondary | `/health` | `/v1/models` | `/v1/chat/completions` | **No** (`UNSUPPORTED_RUNTIME_OPERATION`) | HTTP `AbortSignal` |
+| `vllm` | Secondary | `/health` | `/v1/models` | `/v1/chat/completions` | **No** (`UNSUPPORTED_RUNTIME_OPERATION`) | HTTP `AbortSignal` |
+| `sglang` | Secondary | `/health` | `/v1/models` + `/get_model_info` | `/v1/chat/completions` | **No** (`UNSUPPORTED_RUNTIME_OPERATION`) | HTTP `AbortSignal` |
+| `openai_compatible_local` | Secondary | `/v1/models` | `/v1/models` | `/v1/chat/completions` | **No** (`UNSUPPORTED_RUNTIME_OPERATION`) | HTTP `AbortSignal` |
+
+---
+
+## 5. Security Boundaries
+
+- **Authenticated Internal Worker Interface:** `TEJAURA_AIRLLM_WORKER_TOKEN` (referenced only by env var name `auth_token_env_var`, never stored in config) is sent in `X-TEJAURA-Worker-Token` and checked with constant-time `hmac.compare_digest`.
+- **Trusted Endpoints Only:** `endpoint-guard.ts` rejects arbitrary URLs, embedded URL credentials, plaintext non-local HTTP, redirects, and commercial AI API hosts.
+- **Policy & Audit Integration:** `runtime:manage` (`L3`), `model:download` (`L3`), `model:registry_write` (`L4`), `model:load`/`unload` (`L2`), and `model:invoke_local` (`L2`) all pass through `PolicyEvaluator` + `AuditLogger`.

@@ -5,6 +5,10 @@ import {
   type PolicyActor,
   type PolicyEvaluationResult,
 } from '../../core/policy/index.ts';
+import {
+  AIRLLM_WORKER_TOKEN_HEADER,
+  AirLlmRuntimeAdapter,
+} from './adapters/airllm-adapter.ts';
 import { LlamaCppRuntimeAdapter } from './adapters/llama-cpp-adapter.ts';
 import { OllamaRuntimeAdapter } from './adapters/ollama-adapter.ts';
 import { OpenAiCompatibleLocalAdapter } from './adapters/openai-compatible-adapter.ts';
@@ -15,6 +19,7 @@ import {
   validateControlledEndpointUrl,
 } from './endpoint-guard.ts';
 import type {
+  LoadModelMetadata,
   LocalRuntimeType,
   RuntimeAdapter,
   RuntimeDiscoveryResult,
@@ -45,15 +50,26 @@ export interface RuntimeRegistrationResult {
   policy?: PolicyEvaluationResult;
 }
 
+const VALID_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]{2,63}$/;
+
 export class RuntimeManager {
   private readonly adapters = new Map<LocalRuntimeType, RuntimeAdapter>();
   private readonly trustedEndpoints = new Map<string, TrustedRuntimeEndpoint>();
+  private readonly authTokenResolver?: (
+    endpoint: TrustedRuntimeEndpoint,
+  ) => string | null | undefined;
 
   constructor(options?: {
     adapters?: RuntimeAdapter[];
     trustedEndpoints?: TrustedRuntimeEndpoint[];
+    authTokenResolver?: (
+      endpoint: TrustedRuntimeEndpoint,
+    ) => string | null | undefined;
   }) {
+    this.authTokenResolver = options?.authTokenResolver;
+
     const defaults: RuntimeAdapter[] = [
+      new AirLlmRuntimeAdapter(),
       new OllamaRuntimeAdapter(),
       new LlamaCppRuntimeAdapter(),
       new VllmRuntimeAdapter(),
@@ -66,17 +82,50 @@ export class RuntimeManager {
     }
 
     for (const endpoint of options?.trustedEndpoints ?? []) {
-      const check = validateControlledEndpointUrl(endpoint.base_url);
-      if (!check.valid || !check.normalized_url) {
+      const validated = this.validateEndpointRecord(endpoint);
+      if (!validated.ok || !validated.normalized) {
         throw new Error(
-          `Invalid trusted runtime endpoint "${endpoint.endpoint_id}": ${check.error}`,
+          `Invalid trusted runtime endpoint "${endpoint.endpoint_id}": ${validated.error}`,
         );
       }
-      this.trustedEndpoints.set(endpoint.endpoint_id, {
+      this.trustedEndpoints.set(endpoint.endpoint_id, validated.normalized);
+    }
+  }
+
+  private validateEndpointRecord(endpoint: TrustedRuntimeEndpoint): {
+    ok: boolean;
+    code?: string;
+    error?: string;
+    normalized?: TrustedRuntimeEndpoint;
+  } {
+    const check = validateControlledEndpointUrl(endpoint.base_url);
+    if (!check.valid || !check.normalized_url) {
+      return {
+        ok: false,
+        code: check.code ?? 'INVALID_ENDPOINT_URL',
+        error: check.error ?? 'Invalid runtime endpoint URL.',
+      };
+    }
+
+    if (
+      endpoint.auth_token_env_var !== undefined &&
+      !VALID_ENV_VAR_NAME.test(endpoint.auth_token_env_var)
+    ) {
+      return {
+        ok: false,
+        code: 'INVALID_AUTH_TOKEN_ENV_VAR',
+        error:
+          'auth_token_env_var must be an uppercase environment variable identifier (never a secret value).',
+      };
+    }
+
+    return {
+      ok: true,
+      normalized: {
         ...endpoint,
         base_url: check.normalized_url,
-      });
-    }
+      },
+    };
   }
 
   getAdapterSupport(runtimeType: LocalRuntimeType): RuntimeSupportFlags | null {
@@ -119,34 +168,57 @@ export class RuntimeManager {
       };
     }
 
-    const urlCheck = validateControlledEndpointUrl(endpoint.base_url);
-    if (!urlCheck.valid || !urlCheck.normalized_url) {
+    const validated = this.validateEndpointRecord(endpoint);
+    if (!validated.ok || !validated.normalized) {
       return {
         ok: false,
-        code: urlCheck.code ?? 'INVALID_ENDPOINT_URL',
-        error: urlCheck.error ?? 'Invalid runtime endpoint URL.',
+        code: validated.code ?? 'INVALID_ENDPOINT_URL',
+        error: validated.error ?? 'Invalid runtime endpoint URL.',
       };
     }
 
-    const stored: TrustedRuntimeEndpoint = {
-      ...endpoint,
-      base_url: urlCheck.normalized_url,
-    };
-    this.trustedEndpoints.set(stored.endpoint_id, stored);
+    this.trustedEndpoints.set(validated.normalized.endpoint_id, validated.normalized);
 
     return {
       ok: true,
       code: 'ENDPOINT_REGISTERED',
-      endpoint: { ...stored },
+      endpoint: { ...validated.normalized },
       policy,
     };
+  }
+
+  private resolveAuthHeaders(
+    endpoint: TrustedRuntimeEndpoint,
+  ): Record<string, string> | undefined {
+    const injected = this.authTokenResolver?.(endpoint);
+    if (typeof injected === 'string' && injected.trim().length > 0) {
+      return { [AIRLLM_WORKER_TOKEN_HEADER]: injected.trim() };
+    }
+    const envVarName =
+      endpoint.auth_token_env_var ??
+      (endpoint.runtime_type === 'airllm'
+        ? 'TEJAURA_AIRLLM_WORKER_TOKEN'
+        : undefined);
+    if (envVarName) {
+      const value = process.env[envVarName];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return { [AIRLLM_WORKER_TOKEN_HEADER]: value.trim() };
+      }
+    }
+    return undefined;
   }
 
   private resolveAdapterAndEndpoint(
     runtimeType: LocalRuntimeType,
     requestedEndpoint: string,
   ):
-    | { ok: true; adapter: RuntimeAdapter; baseUrl: string; trusted: TrustedRuntimeEndpoint }
+    | {
+        ok: true;
+        adapter: RuntimeAdapter;
+        baseUrl: string;
+        trusted: TrustedRuntimeEndpoint;
+        authHeaders?: Record<string, string>;
+      }
     | { ok: false; code: string; error: string } {
     const adapter = this.adapters.get(runtimeType);
     if (!adapter) {
@@ -175,6 +247,7 @@ export class RuntimeManager {
       adapter,
       baseUrl: resolved.normalized_url,
       trusted: resolved.endpoint,
+      authHeaders: this.resolveAuthHeaders(resolved.endpoint),
     };
   }
 
@@ -195,7 +268,12 @@ export class RuntimeManager {
       };
     }
 
-    return resolved.adapter.healthCheck(resolved.baseUrl, timeoutMs, signal);
+    return resolved.adapter.healthCheck(
+      resolved.baseUrl,
+      timeoutMs,
+      signal,
+      resolved.authHeaders,
+    );
   }
 
   async discoverModels(
@@ -248,6 +326,7 @@ export class RuntimeManager {
       resolved.baseUrl,
       options?.timeoutMs,
       options?.signal,
+      resolved.authHeaders,
     );
   }
 
@@ -259,6 +338,7 @@ export class RuntimeManager {
       timeoutMs?: number;
       signal?: AbortSignal;
       governance?: RuntimeGovernanceContext;
+      metadata?: LoadModelMetadata;
     },
   ): Promise<RuntimeLoadUnloadResult> {
     if (options?.governance) {
@@ -305,6 +385,8 @@ export class RuntimeManager {
       modelName,
       options?.timeoutMs,
       options?.signal,
+      resolved.authHeaders,
+      options?.metadata,
     );
   }
 
@@ -362,6 +444,7 @@ export class RuntimeManager {
       modelName,
       options?.timeoutMs,
       options?.signal,
+      resolved.authHeaders,
     );
   }
 
@@ -412,6 +495,10 @@ export class RuntimeManager {
       };
     }
 
-    return resolved.adapter.infer(resolved.baseUrl, request);
+    return resolved.adapter.infer(
+      resolved.baseUrl,
+      request,
+      resolved.authHeaders,
+    );
   }
 }

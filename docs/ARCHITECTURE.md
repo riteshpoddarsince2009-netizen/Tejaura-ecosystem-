@@ -1,7 +1,7 @@
 # TEJAURA Modular System Architecture
 
-**Document Version:** 1.0.0  
-**Implementation Status:** Architecture Specification (Stage 0). Only `core/`, `intelligence/model-registry/` specifications, and `docs/` exist today. Runtime execution layers are **planned**.
+**Document Version:** 1.2.0  
+**Implementation Status:** Stage 2A — Governance, Contracts, Policy Engine & AirLLM-Primary Local Model Infrastructure Implemented (Pre-Alpha). Control-plane UI (`Stage 3`), sandboxed task execution (`Stage 4`), and autonomous agents remain **planned**.
 
 ---
 
@@ -10,10 +10,10 @@
 TEJAURA is structured as a layered, modular operating system where **governance sits above intelligence**, and **execution sits behind explicit policy gates**:
 
 - **Governance First:** No execution layer can operate without consulting `core/` policies and configuration.
-- **Strict Module Boundaries:** Components communicate through typed contracts and well-defined schemas rather than shared global state.
-- **Provider Agnosticism:** Model providers and external tools live behind interchangeable adapter interfaces.
-- **Phone-First Control Plane:** All user-facing workflows, approval prompts, and system diagnostics are designed to be legible and actionable on small mobile viewports first.
-- **Testability by Default:** Each module must be independently unit-testable without requiring live external LLM calls or paid infrastructure.
+- **Phone as Control Device, Compute on Owner Nodes:** The Android phone is the owner's **control device** for inspection, approvals, and task dispatch—not the large-model inference machine. Large open-weight inference runs on owner-controlled local or remote compute nodes.
+- **AirLLM Primary Engine, Zero Paid Fallback:** AirLLM (`workers/airllm/`) is TEJAURA's primary model inference engine for compatible open-weight text models, supported alongside secondary local runtimes (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local servers). TEJAURA never falls back to paid third-party AI APIs.
+- **Strict Module Boundaries:** TypeScript governance/routing stays cleanly separated from Python AirLLM dependencies via an authenticated internal HTTP worker protocol.
+- **Testability Without GPU or Model Weights:** Every governance, routing, lifecycle, and AirLLM protocol path is unit/integration-testable using deterministic mocks without downloading multi-GB weights.
 
 ---
 
@@ -21,74 +21,65 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 
 ```text
 +-------------------------------------------------------------------+
-|                   4. INTERFACES (Planned)                         |
-|   Phone-First Control UI  |  Approval Inbox  |  Local CLI         |
+|                   4. INTERFACES (Planned - Stage 3)               |
+|   Android / Phone-First Control UI  |  Approval Inbox  |  CLI     |
 +-------------------------------------------------------------------+
                                   |
                                   v
 +-------------------------------------------------------------------+
-|                 1. CORE GOVERNANCE (Implemented Spec)             |
-|   Constitution  |  Identity  |  Permission Policy  |  system.json |
+|        1. CORE GOVERNANCE & POLICY ENGINE (Implemented - Stage 1) |
+|   Constitution & Policy | System Config Validator | Policy Eval   |
+|   Approval Gatekeeper   | Append-Only Audit Logger | Contracts    |
 +-------------------------------------------------------------------+
                                   |
                                   v
 +-------------------------------------------------------------------+
-|               2. RUNTIME & POLICY ENGINE (Planned)                |
-|   Policy Evaluator  |  Approval Gatekeeper  |  Audit Logger       |
-|   Task Orchestrator |  Sandboxed Executor                         |
+|   2. LOCAL INTELLIGENCE & RUNTIME ROUTING (Implemented - Stage 2A)|
+|   Local Model Registry (verified-only) | Hardware Fit Checker     |
+|   Model Lifecycle & Circuit Breaker    | Model Router (no paid)   |
+|   RuntimeManager (AirLLM Primary + Ollama/llama.cpp/vLLM/SGLang)  |
 +-------------------------------------------------------------------+
-                                  |
+                                  |  (X-TEJAURA-Worker-Token / HTTPS or 127.0.0.1)
                                   v
 +-------------------------------------------------------------------+
-|         3. INTELLIGENCE & ADAPTERS (Registry Spec Only)           |
-|   Model Registry (models.json)  |  Provider-Agnostic Adapters     |
-|   Local / Open-Source Runtimes  |  Optional External Connectors   |
+|     3. ISOLATED PYTHON AIRLLM WORKER (Implemented - Stage 2A)     |
+|   workers/airllm/: Authenticated HTTP Control Plane               |
+|   RealAirLlmEngine (airllm.AutoModel - lazy) | MockAirLlmEngine   |
 +-------------------------------------------------------------------+
 ```
 
 ---
 
-## 3. Module Responsibilities
+## 3. Module Responsibilities & Verification Status
 
-### 3.1 `core/` *(Implemented as Specification & Initial Config)*
-- **`core/constitution/TEJAURA_CONSTITUTION.md`:** Defines supreme governance rules and autonomy levels (`L0`–`L4`).
-- **`core/identity/IDENTITY.md`:** Defines TEJAURA's mission, principles, and boundaries.
-- **`core/permissions/PERMISSION_POLICY.md`:** Defines least-privilege scopes, fail-closed semantics, and mandatory `L4` owner approval gates.
-- **`core/configuration/system.json`:** Machine-readable baseline enforcing `defaultAutonomyLevel: "L1"`, `maxAutonomousLevel: "L2"`, and mandatory approval flags.
+### 3.1 `core/` & `contracts/` *(Implemented & Tested)*
+- **`contracts/`:** JSON Schema Draft 2020-12 contracts (`task`, `agent`, `tool`, `approval`, `audit-event`), TypeScript types, and fail-closed Ajv validator.
+- **`core/constitution/`, `core/identity/`, `core/permissions/`:** Constitutional rules, `L0`–`L4` autonomy levels, and non-self-approval policy.
+- **`core/configuration/`:** Draft 2020-12 `system.json` validator rejecting secrets and unsafe autonomy overrides.
+- **`core/policy/`, `core/approvals/`, `core/audit/`:** Deterministic fail-closed Policy Evaluator, single-use human-owner Approval Gatekeeper, and append-only JSONL Audit Logger.
 
-### 3.2 `intelligence/` *(Registry Specification Implemented; Adapters Planned)*
-- **`intelligence/model-registry/models.json`:** Versioned catalog of approved model providers (currently empty).
-- **`intelligence/model-registry/README.md`:** Rules ensuring zero secrets, open-source-first defaults, and uniform adapter metadata.
-- **Planned Model Router & Adapters:** Thin translation layer normalizing chat/completion/tool calls across local runtimes (e.g., Ollama, llama.cpp) and optional remote APIs.
+### 3.2 `intelligence/` *(Implemented & Mock-Tested — Stage 2A)*
+- **`intelligence/model-registry/`:**
+  - Stage 1 baseline (`models.json` / `model-registry.schema.json`) preserved.
+  - Stage 2A local-first registry (`local-model.schema.json`, `local-models.json`, `local-model-registry.ts`) requiring `model_repository` (`repo_id`, `revision`, `source`), `compatibility_status` (`verified | untested | unsupported`), `modality`, `runtime_type`, `hardware_requirements`, `quantization`, `license`, and `local_model_path`. Only `verified` `text` models can be enabled.
+- **`intelligence/hardware/`:** `ComputeNode` modeling and fail-closed `checkHardwareFit` (RAM, VRAM, storage, GPU, online status, runtime support).
+- **`intelligence/runtime/`:** `RuntimeManager`, trusted endpoint allowlist (`endpoint-guard.ts`), `AirLlmRuntimeAdapter` (primary), and secondary adapters for Ollama, llama.cpp, vLLM, SGLang, and compatible servers.
+- **`intelligence/lifecycle/` & `intelligence/router/`:** Availability probing, honest load/unload requests, bounded priority queue, concurrency caps, failure circuit breaker, and `ModelRouter` favoring `airllm` without paid API fallback.
 
-### 3.3 `runtime/` *(Planned — Not Yet Implemented)*
-- **Policy Evaluator:** Validates every requested action against `PERMISSION_POLICY.md` and `system.json` before execution.
-- **Approval Gatekeeper:** Intercepts `L3`/`L4` actions, freezes execution, emits an approval request to the human owner, and verifies out-of-band owner confirmation (preventing self-approval).
-- **Sandboxed Executor:** Runs approved `L2` local tasks within strict filesystem, timeout, and memory limits.
-- **Append-Only Audit Logger:** Records proposals, policy decisions, approvals, and execution outcomes locally.
+### 3.3 `workers/airllm/` *(Implemented; Protocol Tested with Mock Engine — Live GPU Inference Not Yet Verified)*
+- Runs separately from the TypeScript core on owner-controlled compute.
+- Exposes authenticated `/internal/health`, `/internal/models`, `/internal/models/load`, `/internal/models/unload`, `/internal/infer`, and `/internal/requests/cancel`.
+- **Tested:** Protocol auth, compatibility/modality rejection, load/infer/unload, timeouts, and cancellation against `MockAirLlmEngine`.
+- **Not Yet Hardware-Verified:** Executing `RealAirLlmEngine` (`airllm.AutoModel`) end-to-end against downloaded model weights on physical GPU/NVMe hardware.
 
-### 3.4 `interfaces/` *(Planned — Not Yet Implemented)*
-- **Phone-First Web Control Plane:** Responsive mobile UI for inspecting system state, reviewing `L1` drafts, and approving or denying `L3`/`L4` requests with one-tap clarity.
-- **CLI / Local Diagnostics:** Lightweight developer and operator commands for validating configs and running offline tests.
-
----
-
-## 4. Data & Control Flow for Any Action (Target Design)
-
-1. **Intent Received:** Owner submits a task via a phone-first interface or CLI.
-2. **Planning (`L1`):** Intelligence layer proposes a structured plan using only registered models from `models.json`.
-3. **Policy Check:** Runtime Policy Evaluator inspects each step's required scopes and autonomy level (`L0`–`L4`).
-4. **Gate Enforcement:**
-   - `L0`–`L1`: Safe to inspect/display to owner.
-   - `L2`: Permitted inside sandbox if explicitly covered by policy; logged.
-   - `L3`: Pauses for explicit owner approval.
-   - `L4` (Deployments, Payments, Public Publishing, Policy/Secret Changes): Hard-locked; pauses and requires explicit human owner approval and execution confirmation.
-5. **Execution & Audit:** Only approved actions execute, with results and policy verdicts recorded transparently.
+### 3.4 `interfaces/` & Sandboxed Execution *(Planned — Stage 3+)*
+- Phone-first Android / mobile control-plane UI, owner approval inbox, and `L2` sandboxed task execution runtime are **not yet implemented**.
 
 ---
 
-## 5. Non-Negotiable Security Boundaries
+## 4. Non-Negotiable Security Boundaries
 
-- **No Secret Leakage:** Config files and source files hold zero secrets; runtime reads credentials strictly from environment variables or local OS keychains.
-- **No Unchecked Escalation:** Runtime processes run without write access to `core/constitution/` or `core/permissions/`.
-- **Offline-Capable Baseline:** Core governance checks, configuration validation, and local model routing must function without mandatory external cloud dependencies.
+- **Zero Secrets in Source or Registry:** Worker authentication uses environment variable names (`auth_token_env_var` -> `TEJAURA_AIRLLM_WORKER_TOKEN`), never hardcoded tokens.
+- **Untrusted Model Output:** All completions carry `untrusted_model_output: true` and cannot alter permissions, endpoints, registry entries, or `system.json`.
+- **Explicit Compatibility & Modality Gates:** Untested, unsupported, or non-text (`image_generation`, unverified `multimodal_vision`, `audio`) models fail closed before dispatch.
+- **Zero Paid Third-Party AI APIs:** Commercial API hosts are blocked at endpoint validation and omitted from all fallback paths.

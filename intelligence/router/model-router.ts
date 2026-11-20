@@ -8,9 +8,10 @@ import type {
   LocalModelEntry,
   LocalModelRegistry,
 } from '../model-registry/local-model-registry.ts';
-import type {
-  RuntimeInferenceRequest,
-  RuntimeManager,
+import {
+  PRIMARY_LOCAL_RUNTIME,
+  type RuntimeInferenceRequest,
+  type RuntimeManager,
 } from '../runtime/index.ts';
 import type {
   RejectedCandidate,
@@ -72,6 +73,32 @@ export class ModelRouter {
           model_id: model.model_id,
           code: 'MODEL_DISABLED',
           reason: 'Model is disabled.',
+        });
+        continue;
+      }
+
+      if (model.compatibility_status !== 'verified') {
+        rejected.push({
+          model_id: model.model_id,
+          code:
+            model.compatibility_status === 'unsupported'
+              ? 'MODEL_COMPATIBILITY_UNSUPPORTED'
+              : 'MODEL_COMPATIBILITY_UNTESTED',
+          reason: `Model compatibility_status is "${model.compatibility_status}" (only "verified" models are permitted).`,
+        });
+        continue;
+      }
+
+      if (
+        model.modality !== 'text' ||
+        (model.runtime_type === 'airllm' &&
+          (request.required_capabilities.includes('vision') ||
+            model.capabilities.includes('vision')))
+      ) {
+        rejected.push({
+          model_id: model.model_id,
+          code: 'UNSUPPORTED_AIRLLM_MODALITY',
+          reason: `Model modality "${model.modality}" or capability lacks a verified execution path.`,
         });
         continue;
       }
@@ -166,7 +193,12 @@ export class ModelRouter {
         score += 10_000;
       }
       if (request.preferred_runtime_type === model.runtime_type) {
-        score += 2_000;
+        score += 4_000;
+      } else if (
+        !request.preferred_runtime_type &&
+        model.runtime_type === PRIMARY_LOCAL_RUNTIME
+      ) {
+        score += 4_000;
       }
       if (hasImmediateCapacity) {
         score += 5_000;
@@ -307,6 +339,8 @@ export class ModelRouter {
         {
           ...inference,
           model_name: model.model_name,
+          compatibility_status: model.compatibility_status,
+          modality: model.modality,
         },
       );
 

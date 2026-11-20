@@ -1,7 +1,7 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 2 — Local Model Infrastructure & Direct Model Connection Complete  
-**Guiding Constraints:** Human-governed, open-source-first, local-model-first, model-provider agnostic, phone-first, free-first, modular, and testable.
+**Current Position:** Stage 2A — AirLLM Primary Runtime Integration Complete *(Mock-Verified; Live GPU Hardware Verification Pending)*  
+**Guiding Constraints:** Human-governed, open-source-first, local-model-first (AirLLM primary), model-provider agnostic, phone-first control plane, free-first, modular, and testable.
 
 ---
 
@@ -43,17 +43,17 @@
 
 ---
 
-## Stage 2 — Local Model Infrastructure & Direct Model Connection *(Current)*
-**Status:** Implemented & Tested
+## Stage 2 & 2A — AirLLM Primary Runtime & Local Model Infrastructure *(Current)*
+**Status:** Implemented & Tested Against Mock AirLLM Worker & Local Runtime Stubs *(Real GPU/Weight Inference Not Yet Executed)*
 
-- [x] Implement strict Draft 2020-12 Local Model Registry (`local_first_only: true`, `allow_paid_third_party_apis: false`, zero secrets, L4 owner-gated mutations) (`intelligence/model-registry/local-model*`)
-- [x] Implement provider-independent `RuntimeAdapter` & `RuntimeManager` for Ollama, llama.cpp, vLLM, SGLang, and OpenAI-compatible self-hosted servers (`intelligence/runtime/`)
-- [x] Enforce trusted endpoint allowlists, redirect denial, paid third-party API host blocking, timeouts, `AbortSignal` cancellation, and `untrusted_model_output` tagging (`intelligence/runtime/endpoint-guard.ts`)
-- [x] Build Hardware Abstraction (`ComputeNode`, `HardwareManager`, fail-closed `checkHardwareFit` for RAM, VRAM, storage, GPU, and runtime support) (`intelligence/hardware/`)
-- [x] Build Model Lifecycle Manager with availability checks, honest load/unload support reporting, bounded priority queue, concurrency limits, circuit breaker, and health-probe recovery (`intelligence/lifecycle/`)
-- [x] Build capability- and hardware-aware `ModelRouter` with zero paid third-party API fallback (`intelligence/router/`)
-- [x] Integrate `PolicyEvaluator`, `ApprovalService`, and `AuditLogger` for `runtime:manage`, `model:download`, `model:load`/`unload`, `model:discover`, `model:invoke_local`, and `model:registry_write`
-- [x] Add mock HTTP server & security tests (`intelligence/tests/`) and Stage 2 architecture documentation (`docs/LOCAL_MODELS.md`)
+- [x] Implement strict Draft 2020-12 Local Model Registry requiring `model_repository` (`repo_id`, `revision`, `source`), `compatibility_status` (`verified | untested | unsupported`), `modality`, `quantization`, `hardware_requirements`, `license`, `local_model_path`, and `verified`-only enablement (`intelligence/model-registry/local-model*`)
+- [x] Integrate `AirLlmRuntimeAdapter` as TEJAURA's primary local inference runtime (`PRIMARY_LOCAL_RUNTIME = 'airllm'`) alongside secondary adapters (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local) (`intelligence/runtime/`)
+- [x] Implement isolated Python AirLLM worker service (`workers/airllm/`) with constant-time token auth (`X-TEJAURA-Worker-Token`), health/metadata, load/unload, text inference, cooperative timeouts/cancellation, structured errors, and lazy `airllm.AutoModel` wrapper
+- [x] Enforce trusted endpoint allowlists, redirect denial, paid third-party API host blocking, `auth_token_env_var` validation, and `untrusted_model_output` tagging
+- [x] Build Hardware Abstraction (`ComputeNode`, `HardwareManager`, fail-closed `checkHardwareFit`), Model Lifecycle Manager (concurrency, priority queue, circuit breaker), and `ModelRouter` favoring AirLLM with zero paid API fallback
+- [x] Disable unsupported modalities (`image_generation`, `audio`, unverified `multimodal_vision`) fail-closed across schema, registry, router, adapter, and Python worker
+- [x] Verify end-to-end TypeScript-to-Python worker protocol, security boundaries, and routing via offline tests (`intelligence/tests/`, `workers/airllm/test_worker.py`)
+- [ ] Hardware-in-the-loop verification of `RealAirLlmEngine` on owner GPU/NVMe hardware with a pre-staged open-weight checkpoint (manual owner test milestone)
 
 ---
 

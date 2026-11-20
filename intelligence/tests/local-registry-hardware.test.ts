@@ -22,9 +22,16 @@ function makeValidModel(overrides: Partial<LocalModelEntry> = {}): LocalModelEnt
     model_name: 'qwen2.5-coder:7b',
     model_family: 'qwen2.5',
     model_version: '7b-instruct-q4_K_M',
+    model_repository: {
+      repo_id: 'Qwen/Qwen2.5-Coder-7B-Instruct',
+      revision: 'main',
+      source: 'huggingface',
+    },
     local_model_path: 'models/qwen2.5-coder-7b-q4_K_M.gguf',
     controlled_runtime_endpoint: 'http://127.0.0.1:11434',
     runtime_type: 'ollama',
+    compatibility_status: 'verified',
+    modality: 'text',
     capabilities: ['chat', 'text_generation', 'code'],
     hardware_requirements: {
       min_ram_mb: 8192,
@@ -153,6 +160,90 @@ describe('Stage 2 — Local Model Registry & Hardware Abstraction', () => {
     });
     assert.equal(ownerAttempt.ok, true);
     assert.equal(registry.listModels().length, 1);
+
+    // Untested, unsupported, and image-generation models cannot be enabled
+    const untestedDisabled = makeValidModel({
+      model_id: 'untested-llama',
+      runtime_type: 'airllm',
+      compatibility_status: 'untested',
+      enabled: false,
+    });
+    assert.equal(
+      registry.registerModel(untestedDisabled, {
+        actor: {
+          id: 'owner:primary',
+          type: 'owner',
+          trusted_autonomy_level: 'L4',
+          trusted_authenticated: true,
+        },
+        declared_scopes: ['model:registry:write'],
+        system_config: systemConfig,
+        audit_logger: auditLogger,
+        correlation_id: 'corr_reg_3',
+      }).ok,
+      true,
+    );
+    const enableUntested = registry.setEnabled('untested-llama', true, {
+      actor: {
+        id: 'owner:primary',
+        type: 'owner',
+        trusted_autonomy_level: 'L4',
+        trusted_authenticated: true,
+      },
+      declared_scopes: ['model:registry:write'],
+      system_config: systemConfig,
+      audit_logger: auditLogger,
+      correlation_id: 'corr_reg_4',
+    });
+    assert.equal(enableUntested.ok, false);
+    assert.equal(enableUntested.code, 'MODEL_COMPATIBILITY_UNTESTED');
+
+    const enableUnsupported = registry.registerModel(
+      makeValidModel({
+        model_id: 'unsupported-model',
+        runtime_type: 'airllm',
+        compatibility_status: 'unsupported',
+        enabled: true,
+      }),
+      {
+        actor: {
+          id: 'owner:primary',
+          type: 'owner',
+          trusted_autonomy_level: 'L4',
+          trusted_authenticated: true,
+        },
+        declared_scopes: ['model:registry:write'],
+        system_config: systemConfig,
+        audit_logger: auditLogger,
+        correlation_id: 'corr_reg_5',
+      },
+    );
+    assert.equal(enableUnsupported.ok, false);
+    assert.equal(enableUnsupported.code, 'MODEL_COMPATIBILITY_UNSUPPORTED');
+
+    const enableImageGen = registry.registerModel(
+      makeValidModel({
+        model_id: 'sdxl-image-gen',
+        runtime_type: 'airllm',
+        compatibility_status: 'verified',
+        modality: 'image_generation',
+        enabled: true,
+      }),
+      {
+        actor: {
+          id: 'owner:primary',
+          type: 'owner',
+          trusted_autonomy_level: 'L4',
+          trusted_authenticated: true,
+        },
+        declared_scopes: ['model:registry:write'],
+        system_config: systemConfig,
+        audit_logger: auditLogger,
+        correlation_id: 'corr_reg_6',
+      },
+    );
+    assert.equal(enableImageGen.ok, false);
+    assert.equal(enableImageGen.code, 'UNSUPPORTED_MODALITY');
   });
 
   it('verifies RAM, VRAM, storage, GPU, runtime, and online status before claiming fit', () => {

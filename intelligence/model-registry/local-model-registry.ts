@@ -17,6 +17,8 @@ import type {
   LocalRuntimeType,
   ModelAvailabilityStatus,
   ModelCapability,
+  ModelCompatibilityStatus,
+  ModelModality,
 } from '../runtime/runtime-types.ts';
 import localModelSchema from './local-model.schema.json' with { type: 'json' };
 
@@ -39,11 +41,18 @@ export interface HardwareRequirements {
   recommended_vram_mb?: number;
 }
 
+export interface ModelRepositoryInfo {
+  repo_id: string;
+  revision: string;
+  source: 'huggingface' | 'local_mirror' | 'owner_archive';
+}
+
 export interface ModelLicenseInfo {
   name: string;
   spdx_id?: string;
   open_weight: true;
   commercial_use_allowed?: boolean;
+  source_url?: string;
 }
 
 export interface LocalModelEntry {
@@ -51,9 +60,12 @@ export interface LocalModelEntry {
   model_name: string;
   model_family: string;
   model_version: string;
+  model_repository: ModelRepositoryInfo;
   local_model_path: string | null;
   controlled_runtime_endpoint: string | null;
   runtime_type: LocalRuntimeType;
+  compatibility_status: ModelCompatibilityStatus;
+  modality: ModelModality;
   capabilities: ModelCapability[];
   hardware_requirements: HardwareRequirements;
   quantization: string;
@@ -68,6 +80,7 @@ export interface LocalModelRegistryDocument {
   schema_version: string;
   registry_version: string;
   last_updated: string;
+  preferred_runtime?: 'airllm';
   local_first_only: true;
   allow_paid_third_party_apis: false;
   allow_secrets: false;
@@ -230,6 +243,34 @@ export function validateLocalModelRegistry(
     }
     seenIds.add(model.model_id);
 
+    if (model.enabled && model.compatibility_status !== 'verified') {
+      errors.push({
+        path: `$/models/${index}/compatibility_status`,
+        keyword: 'unverified_model_enable_forbidden',
+        message: `Model "${model.model_id}" has compatibility_status "${model.compatibility_status}" and cannot be enabled.`,
+      });
+    }
+
+    if (model.enabled && model.modality !== 'text') {
+      errors.push({
+        path: `$/models/${index}/modality`,
+        keyword: 'unsupported_modality_enable_forbidden',
+        message: `Model "${model.model_id}" has modality "${model.modality}" which is disabled until a verified execution path exists.`,
+      });
+    }
+
+    if (
+      model.enabled &&
+      model.runtime_type === 'airllm' &&
+      model.capabilities.includes('vision')
+    ) {
+      errors.push({
+        path: `$/models/${index}/capabilities`,
+        keyword: 'unsupported_airllm_capability',
+        message: `AirLLM model "${model.model_id}" cannot enable unverified "vision" capability.`,
+      });
+    }
+
     if (model.controlled_runtime_endpoint !== null) {
       const endpointCheck = validateControlledEndpointUrl(
         model.controlled_runtime_endpoint,
@@ -294,6 +335,7 @@ export function parseAndValidateLocalModelRegistry(
 function cloneEntry(entry: LocalModelEntry): LocalModelEntry {
   return {
     ...entry,
+    model_repository: { ...entry.model_repository },
     capabilities: [...entry.capabilities],
     hardware_requirements: { ...entry.hardware_requirements },
     license: { ...entry.license },
@@ -355,10 +397,30 @@ export class LocalModelRegistry {
       };
     }
 
+    if (entry.enabled && entry.compatibility_status !== 'verified') {
+      return {
+        ok: false,
+        code:
+          entry.compatibility_status === 'unsupported'
+            ? 'MODEL_COMPATIBILITY_UNSUPPORTED'
+            : 'MODEL_COMPATIBILITY_UNTESTED',
+        error: `Model "${entry.model_id}" has compatibility_status "${entry.compatibility_status}" and cannot be enabled.`,
+      };
+    }
+
+    if (entry.enabled && entry.modality !== 'text') {
+      return {
+        ok: false,
+        code: 'UNSUPPORTED_MODALITY',
+        error: `Model "${entry.model_id}" has modality "${entry.modality}" which cannot be enabled without a verified execution path.`,
+      };
+    }
+
     const candidateDoc: LocalModelRegistryDocument = {
       schema_version: '1.0.0',
-      registry_version: '0.2.0',
+      registry_version: '0.3.0',
       last_updated: new Date().toISOString(),
+      preferred_runtime: 'airllm',
       local_first_only: true,
       allow_paid_third_party_apis: false,
       allow_secrets: false,
@@ -416,6 +478,30 @@ export class LocalModelRegistry {
         ok: false,
         code: 'MODEL_NOT_FOUND',
         error: `Model "${modelId}" is not registered.`,
+      };
+    }
+
+    if (enabled && existing.compatibility_status !== 'verified') {
+      return {
+        ok: false,
+        code:
+          existing.compatibility_status === 'unsupported'
+            ? 'MODEL_COMPATIBILITY_UNSUPPORTED'
+            : 'MODEL_COMPATIBILITY_UNTESTED',
+        error: `Cannot enable "${modelId}": compatibility_status is "${existing.compatibility_status}" (only "verified" models may be enabled).`,
+      };
+    }
+
+    if (
+      enabled &&
+      (existing.modality !== 'text' ||
+        (existing.runtime_type === 'airllm' &&
+          existing.capabilities.includes('vision')))
+    ) {
+      return {
+        ok: false,
+        code: 'UNSUPPORTED_AIRLLM_MODALITY',
+        error: `Cannot enable "${modelId}": modality "${existing.modality}" lacks a verified execution path.`,
       };
     }
 

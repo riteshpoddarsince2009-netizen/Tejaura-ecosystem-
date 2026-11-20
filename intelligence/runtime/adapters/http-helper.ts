@@ -4,6 +4,7 @@ export interface SafeHttpCallOptions {
   method: 'GET' | 'POST';
   url: string;
   body?: unknown;
+  headers?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -81,6 +82,7 @@ export async function performSafeRuntimeHttpCall(
   try {
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      ...(options.headers ?? {}),
     };
     const init: RequestInit = {
       method: options.method,
