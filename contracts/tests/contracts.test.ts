@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import Ajv2020Module from 'ajv/dist/2020.js';
+import addFormatsModule from 'ajv-formats';
+
+import agentSchema from '../schemas/agent.schema.json' with { type: 'json' };
+import approvalSchema from '../schemas/approval.schema.json' with { type: 'json' };
+import auditEventSchema from '../schemas/audit-event.schema.json' with { type: 'json' };
+import taskSchema from '../schemas/task.schema.json' with { type: 'json' };
+import toolSchema from '../schemas/tool.schema.json' with { type: 'json' };
 
 import type {
   Agent,
@@ -18,6 +26,13 @@ import {
   validateTask,
   validateTool,
 } from '../validation/index.ts';
+
+const Ajv2020 =
+  (Ajv2020Module as unknown as { default?: typeof Ajv2020Module }).default ??
+  Ajv2020Module;
+const addFormats =
+  (addFormatsModule as unknown as { default?: typeof addFormatsModule }).default ??
+  addFormatsModule;
 
 function createValidTask(): Task {
   return {
@@ -250,11 +265,46 @@ describe('TEJAURA Core Contracts — Enum & Governance Enforcement', () => {
     );
   });
 
-  it('rejects invalid Approval status', () => {
+  it('rejects invalid Approval status, self-approval, and agent reviewers', () => {
     assert.equal(
       validateApproval({ ...createValidApproval(), status: 'self_approved' }).valid,
       false,
     );
+
+    const selfApproved = validateApproval({
+      ...createValidApproval(),
+      requested_by: 'owner:primary',
+      status: 'approved',
+      reviewed_by: 'owner:primary',
+      reviewed_at: '2026-11-20T12:06:00Z',
+    });
+    assert.equal(selfApproved.valid, false);
+    assert.equal(selfApproved.errors[0]?.keyword, 'self_approval_forbidden');
+
+    const agentReviewed = validateApproval({
+      ...createValidApproval(),
+      requested_by: 'agent_release_manager',
+      status: 'approved',
+      reviewed_by: 'agent_auditor',
+      reviewed_at: '2026-11-20T12:06:00Z',
+    });
+    assert.equal(agentReviewed.valid, false);
+
+    const pendingWithReviewer = validateApproval({
+      ...createValidApproval(),
+      status: 'pending',
+      reviewed_by: 'owner:primary',
+      reviewed_at: '2026-11-20T12:06:00Z',
+    });
+    assert.equal(pendingWithReviewer.valid, false);
+
+    const approvedWithoutReviewer = validateApproval({
+      ...createValidApproval(),
+      status: 'approved',
+      reviewed_by: null,
+      reviewed_at: null,
+    });
+    assert.equal(approvedWithoutReviewer.valid, false);
   });
 
   it('rejects invalid AuditEvent actor_type, resource_type, and outcome', () => {
@@ -326,18 +376,68 @@ describe('TEJAURA Core Contracts — Unexpected Properties & Secret Protection',
     );
   });
 
-  it('rejects credential or API key property names inside payloads and metadata', () => {
+  it('rejects top-level and nested secret-like property names inside payloads and metadata', () => {
     const taskWithSecret = {
       ...createValidTask(),
       input: { api_key: 'should-never-be-stored' },
     };
     assert.equal(validateTask(taskWithSecret).valid, false);
 
+    const taskWithNestedSecret = {
+      ...createValidTask(),
+      input: { provider_config: { bearer_token: 'nested-secret' } },
+    };
+    const nestedInputRes = validateTask(taskWithNestedSecret);
+    assert.equal(nestedInputRes.valid, false);
+    assert.equal(nestedInputRes.errors[0]?.keyword, 'secret_field_forbidden');
+
+    const taskWithResultSecret = {
+      ...createValidTask(),
+      status: 'succeeded' as const,
+      result: { items: [{ private_key: 'pem-content' }] },
+    };
+    assert.equal(validateTask(taskWithResultSecret).valid, false);
+
     const auditWithSecret = {
       ...createValidAuditEvent(),
       metadata: { password: 'secret-value' },
     };
     assert.equal(validateAuditEvent(auditWithSecret).valid, false);
+
+    const auditWithNestedSecret = {
+      ...createValidAuditEvent(),
+      metadata: { request: { headers: { authorization: 'Bearer abc' } } },
+    };
+    assert.equal(validateAuditEvent(auditWithNestedSecret).valid, false);
+
+    const safeTelemetry = validateAuditEvent({
+      ...createValidAuditEvent(),
+      metadata: { token_count: 128, max_tokens: 1024 },
+    });
+    assert.equal(safeTelemetry.valid, true);
+  });
+});
+
+describe('TEJAURA Core Contracts — Schema Compilation Verification', () => {
+  it('compiles all five JSON schemas under Ajv Draft 2020-12 strict mode', () => {
+    const ajv = new Ajv2020({
+      allErrors: true,
+      strict: true,
+      allowUnionTypes: true,
+      validateFormats: true,
+    });
+    addFormats(ajv);
+
+    for (const schema of [
+      taskSchema,
+      agentSchema,
+      toolSchema,
+      approvalSchema,
+      auditEventSchema,
+    ]) {
+      const validateFn = ajv.compile(schema);
+      assert.equal(typeof validateFn, 'function');
+    }
   });
 });
 

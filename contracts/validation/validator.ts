@@ -134,6 +134,96 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const SECRET_KEY_PATTERN =
+  /^(password|passphrase|secret|secret_?key|api_?key|access_?token|refresh_?token|bearer_?token|auth_?token|id_?token|session_?token|private_?key|client_?secret|credentials?|authorization|jwt|ssh_?key|encryption_?key|signing_?key)$/i;
+
+function findSecretLikeKeyPaths(
+  value: unknown,
+  basePath: string,
+  visited = new Set<object>(),
+  depth = 0,
+): ContractValidationError[] {
+  if (depth > 32 || value === null || typeof value !== 'object') {
+    return [];
+  }
+
+  if (visited.has(value)) {
+    return [
+      {
+        path: basePath,
+        keyword: 'circular_reference',
+        message: 'Circular references are not permitted in contract payloads.',
+      },
+    ];
+  }
+  visited.add(value);
+
+  const errors: ContractValidationError[] = [];
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      errors.push(
+        ...findSecretLikeKeyPaths(
+          value[i],
+          `${basePath}/${i}`,
+          visited,
+          depth + 1,
+        ),
+      );
+    }
+    return errors;
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    const keyPath = `${basePath}/${key}`;
+    if (SECRET_KEY_PATTERN.test(key)) {
+      errors.push({
+        path: keyPath,
+        keyword: 'secret_field_forbidden',
+        message: `Secret-like property "${key}" is not allowed in contract payloads.`,
+      });
+    }
+    errors.push(
+      ...findSecretLikeKeyPaths(nested, keyPath, visited, depth + 1),
+    );
+  }
+
+  return errors;
+}
+
+function validateGovernanceInvariants<K extends ContractKind>(
+  kind: K,
+  value: ContractMap[K],
+): ContractValidationError[] {
+  const errors: ContractValidationError[] = [];
+
+  if (kind === 'task') {
+    const task = value as Task;
+    errors.push(...findSecretLikeKeyPaths(task.input, '$/input'));
+    if (task.result !== null) {
+      errors.push(...findSecretLikeKeyPaths(task.result, '$/result'));
+    }
+  } else if (kind === 'audit_event') {
+    const event = value as AuditEvent;
+    errors.push(...findSecretLikeKeyPaths(event.metadata, '$/metadata'));
+  } else if (kind === 'approval') {
+    const approval = value as Approval;
+    if (
+      approval.reviewed_by !== null &&
+      approval.reviewed_by === approval.requested_by
+    ) {
+      errors.push({
+        path: '$/reviewed_by',
+        keyword: 'self_approval_forbidden',
+        message:
+          'Self-approval is forbidden: reviewed_by cannot match requested_by.',
+      });
+    }
+  }
+
+  return errors;
+}
+
 export function createContractValidator(
   schemas: ContractSchemas = DEFAULT_SCHEMAS,
 ): ContractValidator {
@@ -201,18 +291,28 @@ export function createContractValidator(
 
     try {
       const valid = validator(input);
-      if (valid) {
+      if (!valid) {
         return {
-          valid: true,
-          data: input as unknown as ContractMap[K],
-          errors: [],
+          valid: false,
+          data: null,
+          errors: formatAjvErrors(validator.errors),
+        };
+      }
+
+      const typedInput = input as unknown as ContractMap[K];
+      const invariantErrors = validateGovernanceInvariants(kind, typedInput);
+      if (invariantErrors.length > 0) {
+        return {
+          valid: false,
+          data: null,
+          errors: invariantErrors,
         };
       }
 
       return {
-        valid: false,
-        data: null,
-        errors: formatAjvErrors(validator.errors),
+        valid: true,
+        data: typedInput,
+        errors: [],
       };
     } catch (err) {
       return failClosed(
