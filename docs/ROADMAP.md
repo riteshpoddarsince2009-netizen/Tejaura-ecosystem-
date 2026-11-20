@@ -1,6 +1,6 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 2A — AirLLM Primary Runtime Integration Complete *(Mock-Verified; Live GPU Hardware Verification Pending)*  
+**Current Position:** Stage 2B — Private Identity, Authentication & Security Foundation Complete *(Auth, Sessions, RBAC, Secrets & AirLLM Mock-Verified; Live GPU Inference & Control-Plane UI Pending)*  
 **Guiding Constraints:** Human-governed, open-source-first, local-model-first (AirLLM primary), model-provider agnostic, phone-first control plane, free-first, modular, and testable.
 
 ---
@@ -43,7 +43,7 @@
 
 ---
 
-## Stage 2 & 2A — AirLLM Primary Runtime & Local Model Infrastructure *(Current)*
+## Stage 2 & 2A — AirLLM Primary Runtime & Local Model Infrastructure *(Complete — Mock-Verified)*
 **Status:** Implemented & Tested Against Mock AirLLM Worker & Local Runtime Stubs *(Real GPU/Weight Inference Not Yet Executed)*
 
 - [x] Implement strict Draft 2020-12 Local Model Registry requiring `model_repository` (`repo_id`, `revision`, `source`), `compatibility_status` (`verified | untested | unsupported`), `modality`, `quantization`, `hardware_requirements`, `license`, `local_model_path`, and `verified`-only enablement (`intelligence/model-registry/local-model*`)
@@ -54,6 +54,20 @@
 - [x] Disable unsupported modalities (`image_generation`, `audio`, unverified `multimodal_vision`) fail-closed across schema, registry, router, adapter, and Python worker
 - [x] Verify end-to-end TypeScript-to-Python worker protocol, security boundaries, and routing via offline tests (`intelligence/tests/`, `workers/airllm/test_worker.py`)
 - [ ] Hardware-in-the-loop verification of `RealAirLlmEngine` on owner GPU/NVMe hardware with a pre-staged open-weight checkpoint (manual owner test milestone)
+
+---
+
+## Stage 2B — Private Identity, Authentication & Security Foundation *(Current)*
+**Status:** Implemented & Tested
+
+- [x] Independent owner identity (`setupInitialOwner`, username/email login, Argon2id hashing with unique random salts) (`core/auth/`, `core/security/`)
+- [x] Secure `HttpOnly`, `Secure`, `SameSite`, `__Host-` session cookies, idle + absolute expiry, logout, session revocation, and sliding-window login rate limiting (`core/auth/`)
+- [x] Extensible MFA (`TotpMfaModule` with encrypted secret & replay guard) and Passkey (`WebAuthnPasskeyVerifier` ES256/EdDSA) modules (`core/auth/mfa-passkey.ts`)
+- [x] Single-use Argon2id-hashed account recovery revoking all prior sessions without exposing secrets (`core/auth/auth-service.ts`)
+- [x] Separate `SecretsManager` (`EnvSecretProvider` + AES-256-GCM `FileEncryptedVaultBackend`), zero frontend/agent exposure, and strict `TEJAURA_AIRLLM_WORKER_TOKEN` separation (`core/secrets/`)
+- [x] Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) preserving owner-only `L3`/`L4` approvals (`core/rbac/`)
+- [x] Typed security audit emitters for login, logout, failed auth, permission changes, and secret access (`core/audit/`)
+- [x] AES-256-GCM at-rest encryption, HTTPS deployment enforcement, Draft 2020-12 security schemas/examples, threat model, and automated tests (`core/tests/auth-security.test.ts`, `core/tests/secrets-rbac.test.ts`, `docs/AUTH_AND_SECRETS.md`, `docs/THREAT_MODEL.md`)
 
 ---
 

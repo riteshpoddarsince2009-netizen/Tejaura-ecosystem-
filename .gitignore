@@ -17,6 +17,8 @@ coverage/
 *.p12
 *.pfx
 *.secret
+*.vault.json
+*.enc.json
 secrets/
 credentials*.json
 *service-account*.json

@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Stage 2 — Core Governance, Policy Engine & Local Model Infrastructure Implemented (Pre-Alpha)  
-> **Runtime Implementation:** Autonomous agents, sandboxed task execution, and the phone-first control-plane UI are **not yet implemented**. Implemented today: governance specifications, system/registry config validators, Core Contracts, deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, and Stage 2 Local Model Infrastructure (Local Model Registry, Hardware Abstraction, direct Runtime Adapters for Ollama/llama.cpp/vLLM/SGLang/compatible servers, Lifecycle Manager, and Model Router).
+> **Status:** Stage 2B — Core Governance, Policy Engine, AirLLM-Primary Local Model Infrastructure & Private Identity/Security Foundation Implemented (Pre-Alpha)  
+> **Runtime Implementation:** Autonomous agents, sandboxed task execution, and the phone-first control-plane UI are **not yet implemented**. Implemented today: governance specifications, system/registry config validators, Core Contracts, deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), and Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/security/`, `core/auth/`, `core/rbac/`, `core/secrets/`).
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -52,11 +52,18 @@ To avoid ambiguity, TEJAURA strictly separates what exists today from what is pl
   - `intelligence/lifecycle/` — `ModelLifecycleManager` (availability, honest load/unload, priority queue, concurrency limits, circuit breaker & recovery).
   - `intelligence/router/` — `ModelRouter` (capability/hardware/context routing with zero paid API fallback).
   - `intelligence/tests/` — Mock HTTP server, hardware, lifecycle, routing, and security tests.
+- **Stage 2B Private Identity, Auth, RBAC & Secrets Foundation (`core/`):**
+  - `core/security/` — Draft 2020-12 security config & identity store validators, Argon2id hashing, AES-256-GCM encryption at rest, and HTTPS enforcement.
+  - `core/auth/` — Independent owner setup, username/email login, sliding-window rate limiting, `HttpOnly`/`Secure`/`SameSite` cookies, session lifecycle, extensible TOTP MFA & WebAuthn passkeys, and single-use account recovery.
+  - `core/rbac/` — Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) and `PolicyActor`/`TrustedReviewerContext` session bridges.
+  - `core/secrets/` — Isolated `SecretsManager` (`EnvSecretProvider` + AES-256-GCM vault) blocking agents/frontend and preserving `TEJAURA_AIRLLM_WORKER_TOKEN` separation.
 - **Technical Documentation:**
   - `docs/ARCHITECTURE.md` — Modular target architecture and component boundaries.
   - `docs/CONTRACTS.md` — Core Contracts specification, validation usage, extension guide, and versioning.
   - `docs/SECURITY_MODEL.md` — Stage 1 security architecture and trust boundaries.
-  - `docs/LOCAL_MODELS.md` — Stage 2 local-model-first architecture, runtime matrix, and setup.
+  - `docs/AUTH_AND_SECRETS.md` — Stage 2B authentication, sessions, MFA/passkeys, RBAC, and secrets architecture.
+  - `docs/THREAT_MODEL.md` — Stage 2B security threat model and residual risks.
+  - `docs/LOCAL_MODELS.md` — Stage 2/2A local-model-first & AirLLM architecture, runtime matrix, and setup.
   - `docs/ROADMAP.md` — Staged development plan from foundation to operable OS.
 - **Repository Hygiene:**
   - `.gitignore` — Secure defaults preventing accidental exposure of secrets, keys, and local artifacts.
@@ -143,6 +150,8 @@ At this stage, setup consists of cloning the repository, configuring local envir
 - [System Configuration](core/configuration/system.json)
 - [Core Contracts Guide](docs/CONTRACTS.md)
 - [Security Model](docs/SECURITY_MODEL.md)
+- [Auth & Secrets Architecture](docs/AUTH_AND_SECRETS.md)
+- [Stage 2B Threat Model](docs/THREAT_MODEL.md)
 - [Local Model Infrastructure](docs/LOCAL_MODELS.md)
 - [Model Registry Rules](intelligence/model-registry/README.md)
 - [System Architecture](docs/ARCHITECTURE.md)

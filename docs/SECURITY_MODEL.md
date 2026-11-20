@@ -42,9 +42,11 @@
 
 ---
 
-## 5. Known Security Limitations (Stage 1)
+## 5. Known Security Limitations & Stage 2B Updates
 
-1. **No Built-in Authentication Provider:** Owner identity verification relies on the host caller's external authentication boundary (`TrustedReviewerContext`).
-2. **Local JSONL Audit Logs Are Not Tamper-Proof:** `JsonlAuditStorage` uses append-only writes (`O_APPEND`) and `0600` file modes, which protect against accidental overwrites and web exposure, **not** against a privileged OS user or compromised host altering local files. Cryptographic hash-chaining or remote WORM anchoring is deferred to later hardening stages.
-3. **In-Memory Approval Store:** `InMemoryApprovalStore` does not persist across process restarts; persistent encrypted/locked storage belongs to runtime persistence stages.
+> **Stage 2B Update:** Built-in independent owner authentication (Argon2id, `HttpOnly`/`Secure`/`SameSite` sessions, rate limiting, extensible MFA/passkeys, single-use recovery), AES-256-GCM encrypted persistence (`identity.enc.json`, `secrets.vault.json`), default-deny RBAC, and isolated `SecretsManager` are now implemented and documented in [AUTH_AND_SECRETS.md](AUTH_AND_SECRETS.md) and [THREAT_MODEL.md](THREAT_MODEL.md).
+
+1. **Local JSONL Audit Logs Are Not Tamper-Proof:** `JsonlAuditStorage` uses append-only writes (`O_APPEND`) and `0600` file modes, which protect against accidental overwrites and web exposure, **not** against a privileged OS user or compromised host altering local files. Cryptographic hash-chaining or remote WORM anchoring is deferred to later hardening stages.
+2. **Host Key Injection & Memory Residency:** Stage 2B uses AES-256-GCM at rest keyed from `TEJAURA_SECRETS_MASTER_KEY`; hardware-backed KMS/HSM sealing is deferred to later hardening stages.
+3. **In-Memory Approval & Rate-Limit Stores:** `InMemoryApprovalStore` and `LoginRateLimiter` do not persist across process restarts.
 4. **No Process Sandboxing Yet:** `PolicyEvaluator` enforces `L2` sandbox policy decisions, while OS/container process isolation (`Stage 4`) is not yet implemented.

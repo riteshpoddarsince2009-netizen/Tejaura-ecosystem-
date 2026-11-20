@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0.0",
+  "argon2id": {
+    "memoryCostKiB": 65536,
+    "timeCost": 3,
+    "parallelism": 1,
+    "saltBytes": 16,
+    "hashLength": 32
+  },
+  "passwordPolicy": {
+    "minLength": 14,
+    "maxLength": 128,
+    "requireCharacterClasses": 3
+  },
+  "session": {
+    "cookieName": "__Host-tejaura_session",
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "strict",
+    "path": "/",
+    "ttlSeconds": 28800,
+    "idleTimeoutSeconds": 3600,
+    "maxActiveSessionsPerOwner": 5
+  },
+  "rateLimit": {
+    "maxAttempts": 5,
+    "windowSeconds": 900,
+    "lockoutSeconds": 900
+  },
+  "transport": {
+    "enforceHttpsInDeployment": true,
+    "trustProxyProtoHeader": true,
+    "allowLocalLoopbackHttpInDev": true
+  },
+  "mfa": {
+    "allowTotpModule": true,
+    "allowPasskeyModule": true,
+    "requireMfaWhenEnrolled": true
+  },
+  "recovery": {
+    "codeCount": 8,
+    "singleUse": true,
+    "revokeAllSessionsOnRecovery": true
+  },
+  "secrets": {
+    "workerTokenEnvVar": "TEJAURA_AIRLLM_WORKER_TOKEN",
+    "masterKeyEnvVar": "TEJAURA_SECRETS_MASTER_KEY",
+    "encryptionAlgorithm": "aes-256-gcm",
+    "exposeToFrontend": false,
+    "exposeToAgents": false
+  }
+}

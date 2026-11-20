@@ -212,6 +212,22 @@ export const POLICY_ACTION_CATALOG: Readonly<
     allowed_environments: ['local', 'staging', 'production'],
     description: 'Access or rotate credentials and secrets (owner-only).',
   },
+  'auth:admin': {
+    action: 'auth:admin',
+    required_autonomy: 'L4',
+    required_scope: 'auth:admin',
+    owner_exclusive: true,
+    allowed_environments: ['sandbox', 'local', 'staging', 'production'],
+    description: 'Manage owner authentication, MFA/passkey enrollment, or session revocation (owner-only).',
+  },
+  'rbac:manage': {
+    action: 'rbac:manage',
+    required_autonomy: 'L4',
+    required_scope: 'rbac:manage',
+    owner_exclusive: true,
+    allowed_environments: ['sandbox', 'local', 'staging', 'production'],
+    description: 'Assign or revoke RBAC roles and permissions (owner-only).',
+  },
   'data:delete': {
     action: 'data:delete',
     required_autonomy: 'L4',

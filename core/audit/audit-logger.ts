@@ -448,4 +448,103 @@ export class AuditLogger {
       },
     });
   }
+
+  logAuthEvent(params: {
+    actor_type: AuditEvent['actor_type'];
+    actor_id: string;
+    event_type:
+      | 'auth.setup.completed'
+      | 'auth.login.succeeded'
+      | 'auth.login.failed'
+      | 'auth.logout'
+      | 'auth.session.revoked'
+      | 'auth.mfa.enrolled'
+      | 'auth.mfa.verified'
+      | 'auth.mfa.failed'
+      | 'auth.passkey.registered'
+      | 'auth.passkey.verified'
+      | 'auth.passkey.failed'
+      | 'auth.recovery.generated'
+      | 'auth.recovery.succeeded'
+      | 'auth.recovery.failed';
+    resource_id: string;
+    action: string;
+    outcome: AuditEvent['outcome'];
+    correlation_id: string;
+    metadata?: Record<string, unknown>;
+  }): AuditLogResult {
+    return this.logEvent({
+      actor_type: params.actor_type,
+      actor_id: params.actor_id,
+      event_type: params.event_type,
+      resource_type: 'system',
+      resource_id: params.resource_id,
+      action: params.action,
+      outcome: params.outcome,
+      correlation_id: params.correlation_id,
+      approval_id: null,
+      metadata: params.metadata,
+    });
+  }
+
+  logPermissionChange(params: {
+    actor_type: AuditEvent['actor_type'];
+    actor_id: string;
+    target_actor_id: string;
+    event_type:
+      | 'rbac.role.assigned'
+      | 'rbac.role.revoked'
+      | 'rbac.permission.changed'
+      | 'rbac.access.denied';
+    action: string;
+    outcome: AuditEvent['outcome'];
+    correlation_id: string;
+    approval_id?: string | null;
+    metadata?: Record<string, unknown>;
+  }): AuditLogResult {
+    return this.logEvent({
+      actor_type: params.actor_type,
+      actor_id: params.actor_id,
+      event_type: params.event_type,
+      resource_type: 'governance',
+      resource_id: `rbac:${params.target_actor_id}`,
+      action: params.action,
+      outcome: params.outcome,
+      correlation_id: params.correlation_id,
+      approval_id: params.approval_id ?? null,
+      metadata: params.metadata,
+    });
+  }
+
+  logSecretAccess(params: {
+    actor_type: AuditEvent['actor_type'];
+    actor_id: string;
+    secret_key_name: string;
+    event_type:
+      | 'secret.accessed'
+      | 'secret.stored'
+      | 'secret.rotated'
+      | 'secret.deleted'
+      | 'secret.access_denied';
+    action: string;
+    outcome: AuditEvent['outcome'];
+    correlation_id: string;
+    metadata?: Record<string, unknown>;
+  }): AuditLogResult {
+    return this.logEvent({
+      actor_type: params.actor_type,
+      actor_id: params.actor_id,
+      event_type: params.event_type,
+      resource_type: 'configuration',
+      resource_id: `secret:${params.secret_key_name}`,
+      action: params.action,
+      outcome: params.outcome,
+      correlation_id: params.correlation_id,
+      approval_id: null,
+      metadata: {
+        ...params.metadata,
+        secret_key_name: params.secret_key_name,
+      },
+    });
+  }
 }

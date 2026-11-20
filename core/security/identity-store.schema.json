@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.local/schemas/identity-store.schema.json",
+  "title": "TEJAURA Encrypted Identity Store Snapshot",
+  "description": "Schema for persisted owner identity, hashed credentials, hashed single-use recovery codes, encrypted MFA factors, passkeys, and hashed session metadata. Plaintext secrets or passwords are never allowed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "owner",
+    "sessions",
+    "roleAssignments"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "owner": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner_id",
+            "username",
+            "email",
+            "password_hash",
+            "role",
+            "created_at",
+            "updated_at",
+            "mfa_factors",
+            "passkeys",
+            "recovery_codes"
+          ],
+          "properties": {
+            "owner_id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,63}$"
+            },
+            "username": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{2,31}$"
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            },
+            "password_hash": {
+              "type": "string",
+              "pattern": "^\\$argon2id\\$"
+            },
+            "role": {
+              "const": "owner"
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "mfa_factors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "factor_id",
+                  "type",
+                  "label",
+                  "enabled",
+                  "enrolled_at",
+                  "encrypted_secret",
+                  "last_used_step"
+                ],
+                "properties": {
+                  "factor_id": { "type": "string", "minLength": 4 },
+                  "type": { "type": "string", "enum": ["totp", "custom"] },
+                  "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "enabled": { "type": "boolean" },
+                  "enrolled_at": { "type": "string", "format": "date-time" },
+                  "encrypted_secret": { "$ref": "#/$defs/encryptedEnvelope" },
+                  "last_used_step": {
+                    "type": ["integer", "null"]
+                  }
+                }
+              }
+            },
+            "passkeys": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "credential_id",
+                  "label",
+                  "algorithm",
+                  "public_key_pem",
+                  "sign_count",
+                  "registered_at",
+                  "last_used_at",
+                  "transports"
+                ],
+                "properties": {
+                  "credential_id": { "type": "string", "minLength": 8 },
+                  "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "algorithm": { "type": "string", "enum": ["ES256", "EdDSA", "custom"] },
+                  "public_key_pem": { "type": "string", "minLength": 32 },
+                  "sign_count": { "type": "integer", "minimum": 0 },
+                  "registered_at": { "type": "string", "format": "date-time" },
+                  "last_used_at": { "type": ["string", "null"], "format": "date-time" },
+                  "transports": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "recovery_codes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code_id",
+                  "code_hash",
+                  "used_at"
+                ],
+                "properties": {
+                  "code_id": { "type": "string", "minLength": 4 },
+                  "code_hash": {
+                    "type": "string",
+                    "pattern": "^\\$argon2id\\$"
+                  },
+                  "used_at": { "type": ["string", "null"], "format": "date-time" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "token_hash",
+          "actor_id",
+          "role",
+          "created_at",
+          "last_seen_at",
+          "idle_expires_at",
+          "expires_at",
+          "revoked_at",
+          "revocation_reason",
+          "encrypted_metadata"
+        ],
+        "properties": {
+          "session_id": { "type": "string", "minLength": 8 },
+          "token_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "actor_id": { "type": "string", "minLength": 2 },
+          "role": { "type": "string", "enum": ["owner", "operator_readonly", "agent_restricted", "worker_service"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_seen_at": { "type": "string", "format": "date-time" },
+          "idle_expires_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "revoked_at": { "type": ["string", "null"], "format": "date-time" },
+          "revocation_reason": { "type": ["string", "null"] },
+          "encrypted_metadata": {
+            "oneOf": [
+              { "type": "null" },
+              { "$ref": "#/$defs/encryptedEnvelope" }
+            ]
+          }
+        }
+      }
+    },
+    "roleAssignments": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["owner", "operator_readonly", "agent_restricted", "worker_service"]
+      }
+    }
+  },
+  "$defs": {
+    "encryptedEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "iv_b64",
+        "tag_b64",
+        "ciphertext_b64"
+      ],
+      "properties": {
+        "alg": { "const": "aes-256-gcm" },
+        "iv_b64": { "type": "string", "minLength": 16 },
+        "tag_b64": { "type": "string", "minLength": 16 },
+        "ciphertext_b64": { "type": "string", "minLength": 1 },
+        "key_id": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

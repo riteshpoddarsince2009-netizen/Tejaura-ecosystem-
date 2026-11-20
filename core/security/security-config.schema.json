@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.local/schemas/security-config.schema.json",
+  "title": "TEJAURA Security & Authentication Configuration",
+  "description": "Fail-closed Stage 2B configuration schema for owner authentication, session cookies, Argon2id, HTTPS enforcement, rate limiting, MFA/passkeys, recovery, and secrets isolation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "argon2id",
+    "passwordPolicy",
+    "session",
+    "rateLimit",
+    "transport",
+    "mfa",
+    "recovery",
+    "secrets"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "argon2id": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memoryCostKiB",
+        "timeCost",
+        "parallelism",
+        "saltBytes",
+        "hashLength"
+      ],
+      "properties": {
+        "memoryCostKiB": {
+          "type": "integer",
+          "minimum": 19456,
+          "maximum": 1048576
+        },
+        "timeCost": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 32
+        },
+        "parallelism": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "saltBytes": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 64
+        },
+        "hashLength": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 64
+        }
+      }
+    },
+    "passwordPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minLength",
+        "maxLength",
+        "requireCharacterClasses"
+      ],
+      "properties": {
+        "minLength": {
+          "type": "integer",
+          "minimum": 12,
+          "maximum": 64
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 256
+        },
+        "requireCharacterClasses": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 4
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cookieName",
+        "httpOnly",
+        "secure",
+        "sameSite",
+        "path",
+        "ttlSeconds",
+        "idleTimeoutSeconds",
+        "maxActiveSessionsPerOwner"
+      ],
+      "properties": {
+        "cookieName": {
+          "type": "string",
+          "pattern": "^__Host-[a-zA-Z0-9_.-]{3,48}$"
+        },
+        "httpOnly": {
+          "const": true
+        },
+        "secure": {
+          "const": true
+        },
+        "sameSite": {
+          "type": "string",
+          "enum": ["strict", "lax"]
+        },
+        "path": {
+          "const": "/"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 300,
+          "maximum": 604800
+        },
+        "idleTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 300,
+          "maximum": 86400
+        },
+        "maxActiveSessionsPerOwner": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
+    "rateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxAttempts",
+        "windowSeconds",
+        "lockoutSeconds"
+      ],
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 20
+        },
+        "windowSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        },
+        "lockoutSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enforceHttpsInDeployment",
+        "trustProxyProtoHeader",
+        "allowLocalLoopbackHttpInDev"
+      ],
+      "properties": {
+        "enforceHttpsInDeployment": {
+          "const": true
+        },
+        "trustProxyProtoHeader": {
+          "type": "boolean"
+        },
+        "allowLocalLoopbackHttpInDev": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mfa": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowTotpModule",
+        "allowPasskeyModule",
+        "requireMfaWhenEnrolled"
+      ],
+      "properties": {
+        "allowTotpModule": {
+          "type": "boolean"
+        },
+        "allowPasskeyModule": {
+          "type": "boolean"
+        },
+        "requireMfaWhenEnrolled": {
+          "const": true
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "codeCount",
+        "singleUse",
+        "revokeAllSessionsOnRecovery"
+      ],
+      "properties": {
+        "codeCount": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 16
+        },
+        "singleUse": {
+          "const": true
+        },
+        "revokeAllSessionsOnRecovery": {
+          "const": true
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workerTokenEnvVar",
+        "masterKeyEnvVar",
+        "encryptionAlgorithm",
+        "exposeToFrontend",
+        "exposeToAgents"
+      ],
+      "properties": {
+        "workerTokenEnvVar": {
+          "const": "TEJAURA_AIRLLM_WORKER_TOKEN"
+        },
+        "masterKeyEnvVar": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{3,63}$"
+        },
+        "encryptionAlgorithm": {
+          "const": "aes-256-gcm"
+        },
+        "exposeToFrontend": {
+          "const": false
+        },
+        "exposeToAgents": {
+          "const": false
+        }
+      }
+    }
+  }
+}

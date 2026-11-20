@@ -1,7 +1,7 @@
 # TEJAURA Modular System Architecture
 
-**Document Version:** 1.2.0  
-**Implementation Status:** Stage 2A — Governance, Contracts, Policy Engine & AirLLM-Primary Local Model Infrastructure Implemented (Pre-Alpha). Control-plane UI (`Stage 3`), sandboxed task execution (`Stage 4`), and autonomous agents remain **planned**.
+**Document Version:** 1.3.0  
+**Implementation Status:** Stage 2B — Governance, Contracts, Policy Engine, AirLLM-Primary Local Model Infrastructure, and Private Identity/Auth/RBAC/Secrets Foundation Implemented (Pre-Alpha). Control-plane UI (`Stage 3`), sandboxed task execution (`Stage 4`), and autonomous agents remain **planned**.
 
 ---
 
@@ -13,7 +13,7 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 - **Phone as Control Device, Compute on Owner Nodes:** The Android phone is the owner's **control device** for inspection, approvals, and task dispatch—not the large-model inference machine. Large open-weight inference runs on owner-controlled local or remote compute nodes.
 - **AirLLM Primary Engine, Zero Paid Fallback:** AirLLM (`workers/airllm/`) is TEJAURA's primary model inference engine for compatible open-weight text models, supported alongside secondary local runtimes (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local servers). TEJAURA never falls back to paid third-party AI APIs.
 - **Strict Module Boundaries:** TypeScript governance/routing stays cleanly separated from Python AirLLM dependencies via an authenticated internal HTTP worker protocol.
-- **Testability Without GPU or Model Weights:** Every governance, routing, lifecycle, and AirLLM protocol path is unit/integration-testable using deterministic mocks without downloading multi-GB weights.
+- **Testability Without GPU or Model Weights:** Every governance, auth, RBAC, secrets, routing, lifecycle, and AirLLM protocol path is unit/integration-testable using deterministic mocks without downloading multi-GB weights.
 
 ---
 
@@ -27,9 +27,10 @@ TEJAURA is structured as a layered, modular operating system where **governance 
                                   |
                                   v
 +-------------------------------------------------------------------+
-|        1. CORE GOVERNANCE & POLICY ENGINE (Implemented - Stage 1) |
-|   Constitution & Policy | System Config Validator | Policy Eval   |
-|   Approval Gatekeeper   | Append-Only Audit Logger | Contracts    |
+|   1. CORE GOVERNANCE, IDENTITY & SECURITY (Stages 1 & 2B)         |
+|   Owner Auth (Argon2id, HttpOnly/Secure Cookies, MFA/Passkeys)    |
+|   Default-Deny RBAC | Encrypted Secrets Vault | System Validator  |
+|   Policy Evaluator  | Approval Gatekeeper     | Audit Logger      |
 +-------------------------------------------------------------------+
                                   |
                                   v
@@ -56,7 +57,11 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 - **`contracts/`:** JSON Schema Draft 2020-12 contracts (`task`, `agent`, `tool`, `approval`, `audit-event`), TypeScript types, and fail-closed Ajv validator.
 - **`core/constitution/`, `core/identity/`, `core/permissions/`:** Constitutional rules, `L0`–`L4` autonomy levels, and non-self-approval policy.
 - **`core/configuration/`:** Draft 2020-12 `system.json` validator rejecting secrets and unsafe autonomy overrides.
-- **`core/policy/`, `core/approvals/`, `core/audit/`:** Deterministic fail-closed Policy Evaluator, single-use human-owner Approval Gatekeeper, and append-only JSONL Audit Logger.
+- **`core/security/`:** Draft 2020-12 `security-config` & `identity-store` schemas/validators, Argon2id hashing, AES-256-GCM authenticated encryption, and HTTPS transport enforcement.
+- **`core/auth/`:** Independent once-only owner setup, username/email login, sliding-window rate limiter, `HttpOnly`/`Secure`/`SameSite` session cookies, expiry/logout/revocation, extensible TOTP MFA & WebAuthn passkey modules, and single-use account recovery.
+- **`core/rbac/`:** Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) and `PolicyActor`/`TrustedReviewerContext` session bridges.
+- **`core/secrets/`:** Isolated `SecretsManager` (`EnvSecretProvider` + AES-256-GCM vault) blocking agents/frontend and separating `TEJAURA_AIRLLM_WORKER_TOKEN` from owner auth.
+- **`core/policy/`, `core/approvals/`, `core/audit/`:** Deterministic fail-closed Policy Evaluator, single-use human-owner Approval Gatekeeper, and append-only JSONL Audit Logger (with typed auth, permission-change, and secret-access emitters).
 
 ### 3.2 `intelligence/` *(Implemented & Mock-Tested — Stage 2A)*
 - **`intelligence/model-registry/`:**
