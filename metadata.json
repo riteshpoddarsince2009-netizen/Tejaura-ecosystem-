@@ -1,0 +1,6 @@
+{
+  "name": "TEJAURA",
+  "description": "Human-governed, modular, open-source-first, model-provider agnostic AI operating system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

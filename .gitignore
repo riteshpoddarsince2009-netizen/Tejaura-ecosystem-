@@ -1,0 +1,48 @@
+# Dependencies & build outputs
+node_modules/
+build/
+dist/
+coverage/
+.vite/
+.cache/
+*.tsbuildinfo
+
+# Environment & secrets (never commit real credentials)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.secret
+secrets/
+credentials*.json
+*service-account*.json
+
+# Local runtime state, databases & audit logs
+*.sqlite
+*.sqlite3
+*.db
+.tejaura-state/
+audit-logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS & editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Python / auxiliary local tooling (if used for local open-source models)
+__pycache__/
+*.pyc
+.venv/
+venv/

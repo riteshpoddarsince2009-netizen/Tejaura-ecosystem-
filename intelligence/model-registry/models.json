@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "registryVersion": "0.1.0",
+  "lastUpdated": "2026-11-20T00:00:00Z",
+  "policy": {
+    "providerAgnostic": true,
+    "openSourceFirst": true,
+    "freeFirst": true,
+    "allowSecretsInRegistry": false,
+    "requireExplicitOwnerRegistration": true
+  },
+  "defaultModelId": null,
+  "providers": [],
+  "models": []
+}
