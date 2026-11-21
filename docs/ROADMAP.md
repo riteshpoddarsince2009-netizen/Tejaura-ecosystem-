@@ -1,6 +1,6 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 2B — Private Identity, Authentication & Security Foundation Complete *(Auth, Sessions, RBAC, Secrets & AirLLM Mock-Verified; Live GPU Inference & Control-Plane UI Pending)*  
+**Current Position:** Stage 3 — Core Control Plane, Persistent SQLite Orchestration & Phone-First Owner Control Plane UI Complete *(Automated-Test Verified; Physical GPU Inference, Mobile Device QA & Production Deployment Pending)*  
 **Guiding Constraints:** Human-governed, open-source-first, local-model-first (AirLLM primary), model-provider agnostic, phone-first control plane, free-first, modular, and testable.
 
 ---
@@ -46,38 +46,35 @@
 ## Stage 2 & 2A — AirLLM Primary Runtime & Local Model Infrastructure *(Complete — Mock-Verified)*
 **Status:** Implemented & Tested Against Mock AirLLM Worker & Local Runtime Stubs *(Real GPU/Weight Inference Not Yet Executed)*
 
-- [x] Implement strict Draft 2020-12 Local Model Registry requiring `model_repository` (`repo_id`, `revision`, `source`), `compatibility_status` (`verified | untested | unsupported`), `modality`, `quantization`, `hardware_requirements`, `license`, `local_model_path`, and `verified`-only enablement (`intelligence/model-registry/local-model*`)
-- [x] Integrate `AirLlmRuntimeAdapter` as TEJAURA's primary local inference runtime (`PRIMARY_LOCAL_RUNTIME = 'airllm'`) alongside secondary adapters (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local) (`intelligence/runtime/`)
-- [x] Implement isolated Python AirLLM worker service (`workers/airllm/`) with constant-time token auth (`X-TEJAURA-Worker-Token`), health/metadata, load/unload, text inference, cooperative timeouts/cancellation, structured errors, and lazy `airllm.AutoModel` wrapper
-- [x] Enforce trusted endpoint allowlists, redirect denial, paid third-party API host blocking, `auth_token_env_var` validation, and `untrusted_model_output` tagging
-- [x] Build Hardware Abstraction (`ComputeNode`, `HardwareManager`, fail-closed `checkHardwareFit`), Model Lifecycle Manager (concurrency, priority queue, circuit breaker), and `ModelRouter` favoring AirLLM with zero paid API fallback
-- [x] Disable unsupported modalities (`image_generation`, `audio`, unverified `multimodal_vision`) fail-closed across schema, registry, router, adapter, and Python worker
-- [x] Verify end-to-end TypeScript-to-Python worker protocol, security boundaries, and routing via offline tests (`intelligence/tests/`, `workers/airllm/test_worker.py`)
+- [x] Implement strict Draft 2020-12 Local Model Registry (`intelligence/model-registry/local-model*`)
+- [x] Integrate `AirLlmRuntimeAdapter` as TEJAURA's primary local inference runtime (`PRIMARY_LOCAL_RUNTIME = 'airllm'`) alongside secondary local adapters (`intelligence/runtime/`)
+- [x] Implement isolated Python AirLLM worker service (`workers/airllm/`) with `X-TEJAURA-Worker-Token` verification and cooperative cancellation
+- [x] Enforce trusted endpoint allowlists, paid third-party API host blocking, and `untrusted_model_output` tagging
+- [x] Build Hardware Abstraction, Model Lifecycle Manager, and `ModelRouter` without paid API fallback (`intelligence/hardware/`, `intelligence/lifecycle/`, `intelligence/router/`)
 - [ ] Hardware-in-the-loop verification of `RealAirLlmEngine` on owner GPU/NVMe hardware with a pre-staged open-weight checkpoint (manual owner test milestone)
 
 ---
 
-## Stage 2B — Private Identity, Authentication & Security Foundation *(Current)*
+## Stage 2B — Private Identity, Authentication & Security Foundation *(Complete)*
 **Status:** Implemented & Tested
 
-- [x] Independent owner identity (`setupInitialOwner`, username/email login, Argon2id hashing with unique random salts) (`core/auth/`, `core/security/`)
-- [x] Secure `HttpOnly`, `Secure`, `SameSite`, `__Host-` session cookies, idle + absolute expiry, logout, session revocation, and sliding-window login rate limiting (`core/auth/`)
-- [x] Extensible MFA (`TotpMfaModule` with encrypted secret & replay guard) and Passkey (`WebAuthnPasskeyVerifier` ES256/EdDSA) modules (`core/auth/mfa-passkey.ts`)
-- [x] Single-use Argon2id-hashed account recovery revoking all prior sessions without exposing secrets (`core/auth/auth-service.ts`)
-- [x] Separate `SecretsManager` (`EnvSecretProvider` + AES-256-GCM `FileEncryptedVaultBackend`), zero frontend/agent exposure, and strict `TEJAURA_AIRLLM_WORKER_TOKEN` separation (`core/secrets/`)
-- [x] Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) preserving owner-only `L3`/`L4` approvals (`core/rbac/`)
-- [x] Typed security audit emitters for login, logout, failed auth, permission changes, and secret access (`core/audit/`)
-- [x] AES-256-GCM at-rest encryption, HTTPS deployment enforcement, Draft 2020-12 security schemas/examples, threat model, and automated tests (`core/tests/auth-security.test.ts`, `core/tests/secrets-rbac.test.ts`, `docs/AUTH_AND_SECRETS.md`, `docs/THREAT_MODEL.md`)
+- [x] Independent owner identity (`setupInitialOwner`, username/email login, Argon2id hashing) (`core/auth/`, `core/security/`)
+- [x] Secure `HttpOnly`, `Secure`, `SameSite`, `__Host-` session cookies, idle + absolute expiry, logout, session revocation, and rate limiting (`core/auth/`)
+- [x] Extensible TOTP MFA & WebAuthn passkey modules (`core/auth/mfa-passkey.ts`) and single-use account recovery
+- [x] Separate `SecretsManager` (`EnvSecretProvider` + AES-256-GCM vault) with strict `TEJAURA_AIRLLM_WORKER_TOKEN` separation (`core/secrets/`)
+- [x] Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) and typed audit emitters (`core/rbac/`, `core/audit/`)
 
 ---
 
-## Stage 3 — Phone-First Owner Control Plane *(Planned)*
-**Status:** Planned (Not Started)
+## Stage 3 — Core Control Plane & Phone-First Owner Dashboard *(Complete — Automated-Test Verified)*
+**Status:** Implemented & Tested Against Automated Suite *(Manual Android Browser QA & Live HTTPS Deployment Pending)*
 
-- [ ] Design and build responsive mobile-first web UI (375px-first viewport ergonomics)
-- [ ] Implement Owner Approval Inbox for `L3` and `L4` actions (clear impact summaries, approve/reject controls)
-- [ ] Implement System Status & Policy Inspector (read-only view of active autonomy limits, registry entries, and audit trail)
-- [ ] Add draft proposal (`L1`) review workflow before applying local changes
+- [x] Implement schema-migrated SQLite persistent orchestration store (`control-plane/db/`) for tasks, task events, execution attempts, leases, schedules, and approvals
+- [x] Build priority-ordered `TaskOrchestrator` (`control-plane/orchestrator/`) with idempotency keys, deadlines, bounded retries, abortable cancellation, abandoned lease recovery, and non-idempotent external retry guards
+- [x] Build authenticated Express control-plane API (`control-plane/server/`, `server.ts`) enforcing cookie auth, RBAC, CSRF headers/origin checks, `64KB` payload caps, production HTTPS checks, and metadata-only secret exposure
+- [x] Build responsive mobile-first (`375px` Android-first + desktop sidebar) React control-plane UI (`src/`): Auth/Setup/Recovery, Overview Dashboard, Task Center, Approval Inbox (`L3`/`L4` required reason + 2-step confirmation), Schedules, Model & Runtime Center (`Probe Availability`), Read-Only System & Policy Inspector, Read-Only Audit Center, and Settings & Security
+- [x] Add automated orchestration, HTTP API security, and React UI render/non-exposure tests (`control-plane/tests/`)
+- [ ] Manual end-to-end QA on physical Android device over HTTPS reverse proxy and production hardening review
 
 ---
 

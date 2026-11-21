@@ -4,6 +4,7 @@ import type { TaskError, TaskStatus } from '../../contracts/types/index.ts';
 import { validateTask } from '../../contracts/validation/index.ts';
 import {
   ApprovalService,
+  toContractApproval,
   type ApprovalRecord,
 } from '../../core/approvals/index.ts';
 import type { AuditLogger } from '../../core/audit/index.ts';
@@ -56,7 +57,7 @@ export interface TaskOrchestratorOptions {
 
 export class TaskOrchestrator {
   private readonly store: OrchestrationStore;
-  private readonly approvals: ApprovalService;
+  private approvals: ApprovalService;
   private readonly systemConfig: unknown;
   private readonly auditLogger: AuditLogger;
   private readonly registry: LocalModelRegistry;
@@ -100,6 +101,15 @@ export class TaskOrchestrator {
 
   getApprovalService(): ApprovalService {
     return this.approvals;
+  }
+
+  bindDesignatedOwnerId(ownerId: string): void {
+    this.approvals = new ApprovalService({
+      designatedOwnerId: ownerId,
+      store: this.store,
+      auditLogger: this.auditLogger,
+      clock: this.clock,
+    });
   }
 
   getWorkerId(): string {
@@ -264,10 +274,14 @@ export class TaskOrchestrator {
       const expiresAt =
         candidateRecord.deadline_at ??
         new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      const approvalRequester =
+        ctx.actor.type === 'owner'
+          ? (input.assigned_agent_id ?? 'tejaura_execution_pipeline')
+          : ctx.actor.id;
       const approvalRes = this.approvals.requestApproval({
         task_id: candidateRecord.id,
         action: candidateRecord.action,
-        requested_by: ctx.actor.id,
+        requested_by: approvalRequester,
         environment: candidateRecord.environment,
         reason: `${candidateRecord.title}: ${candidateRecord.description}`,
         scope: {
@@ -1033,17 +1047,33 @@ export class TaskOrchestrator {
       }
     }
 
-    const execActor: PolicyActor = {
-      id: task.requested_by,
-      type:
-        actionSpec.owner_exclusive || actionSpec.required_autonomy === 'L4'
-          ? 'owner'
-          : task.assigned_agent_id
-            ? 'agent'
-            : 'owner',
-      trusted_autonomy_level: task.autonomy_level,
-      trusted_authenticated: true,
-    };
+    const isOwnerExclusive =
+      actionSpec.owner_exclusive || actionSpec.required_autonomy === 'L4';
+
+    const execActor: PolicyActor = isOwnerExclusive
+      ? {
+          id: task.requested_by,
+          type: 'owner',
+          trusted_autonomy_level: task.autonomy_level,
+          trusted_authenticated: true,
+        }
+      : task.assigned_agent_id
+        ? {
+            id: task.assigned_agent_id,
+            type: 'agent',
+            trusted_autonomy_level: task.autonomy_level,
+            trusted_authenticated: true,
+          }
+        : {
+            id: 'tejaura_execution_pipeline',
+            type: 'system',
+            trusted_autonomy_level: task.autonomy_level,
+            trusted_authenticated: true,
+          };
+
+    const contractApproval = linkedApproval
+      ? toContractApproval(linkedApproval)
+      : null;
 
     const policyCheck = evaluatePolicyWithAudit({
       actor: execActor,
@@ -1051,11 +1081,12 @@ export class TaskOrchestrator {
       resource: { id: task.resource_id, type: 'task' },
       environment: task.environment,
       declared_scopes: task.declared_scopes,
-      approval: linkedApproval,
-      owner_confirmed_l4:
-        actionSpec.owner_exclusive && linkedApproval === null
-          ? execActor.type === 'owner'
-          : undefined,
+      approval: isOwnerExclusive ? null : contractApproval,
+      owner_confirmed_l4: isOwnerExclusive
+        ? linkedApproval !== null
+          ? linkedApproval.reviewed_by === task.requested_by
+          : execActor.type === 'owner'
+        : undefined,
       system_config: this.systemConfig,
       audit_logger: this.auditLogger,
       correlation_id: `corr_exec_policy_${attempt.attempt_id}`,
@@ -1172,7 +1203,7 @@ export class TaskOrchestrator {
           actor: execActor,
           declared_scopes: task.declared_scopes,
           environment: task.environment,
-          approval: linkedApproval,
+          approval: contractApproval,
           system_config: this.systemConfig,
           audit_logger: this.auditLogger,
           correlation_id: `corr_infer_${attempt.attempt_id}`,

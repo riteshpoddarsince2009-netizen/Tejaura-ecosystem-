@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Stage 2B — Core Governance, Policy Engine, AirLLM-Primary Local Model Infrastructure & Private Identity/Security Foundation Implemented (Pre-Alpha)  
-> **Runtime Implementation:** Autonomous agents, sandboxed task execution, and the phone-first control-plane UI are **not yet implemented**. Implemented today: governance specifications, system/registry config validators, Core Contracts, deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), and Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/security/`, `core/auth/`, `core/rbac/`, `core/secrets/`).
+> **Status:** Stage 3 — Core Control Plane, Persistent SQLite Orchestration & Phone-First Owner Control Plane UI Implemented (Pre-Alpha)  
+> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/security/`, `core/auth/`, `core/rbac/`, `core/secrets/`), and Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`). Sandboxed `L2` execution plugins (`Stage 4`) and autonomous agent loops (`Stage 5`) remain **not yet implemented**. Not production-hardened or physically GPU-verified yet.
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -15,130 +15,66 @@ Unlike autonomous-by-default agent frameworks, TEJAURA places hard constitutiona
 2. **Non-Self-Approval & Least Privilege:** No agent or module may escalate its own permissions, alter governance rules unilaterally, or approve its own sensitive actions.
 3. **Explicit Approval Gates:** Production deployments, financial payments, and public publishing always require explicit human owner approval.
 4. **Zero Secrets in Source:** API keys, tokens, certificates, and credentials must never be committed to source code or configuration files.
-5. **Open-Source-First & Provider-Agnostic:** Built around open standards and swappable provider adapters so no single model vendor or proprietary runtime is required.
-6. **Phone-First & Free-First:** Designed from day one to be operable from mobile devices and runnable on free-tier or local resources without mandatory paid subscriptions.
-7. **Modular & Testable:** Strict separation between governance (`core/`), model metadata (`intelligence/`), and future runtime/interface modules.
+5. **Open-Source-First & Provider-Agnostic:** Built around open standards and swappable local runtime adapters (`airllm` primary; Ollama, llama.cpp, vLLM, SGLang secondary) with **zero paid third-party AI API fallback**.
+6. **Phone-First & Free-First:** The phone/mobile browser acts as the owner's control device while open-weight inference runs on owner-controlled compute nodes.
+7. **Modular & Testable:** Strict separation between governance (`core/`), local intelligence (`intelligence/`), persistent orchestration/control server (`control-plane/`, `server.ts`), and control-plane UI (`src/`).
 
 ---
 
 ## Implemented vs. Planned Status
 
-To avoid ambiguity, TEJAURA strictly separates what exists today from what is planned for future stages.
+To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilities from planned modules and unverified hardware environments.
 
-### Currently Implemented (This Repository)
-- **Foundational Governance & Identity:**
-  - `core/constitution/TEJAURA_CONSTITUTION.md` — Constitutional principles and autonomy levels (`L0`–`L4`).
-  - `core/identity/IDENTITY.md` — System identity, mission, and non-goals.
-  - `core/permissions/PERMISSION_POLICY.md` — Least-privilege model and mandatory human approval rules.
-- **System Configuration:**
-  - `core/configuration/system.json` — Validated initial JSON configuration baseline.
-- **Model Registry Specification:**
-  - `intelligence/model-registry/README.md` — Rules and schema for registering model providers.
-  - `intelligence/model-registry/models.json` — Empty, versioned model registry baseline.
-- **Core Contracts & Fail-Closed Validator (Milestone 1):**
-  - `contracts/schemas/*.schema.json` — JSON Schema Draft 2020-12 contracts for `task`, `agent`, `tool`, `approval`, and `audit-event`.
-  - `contracts/types/*.ts` — Strict TypeScript interfaces aligned with the JSON Schemas.
-  - `contracts/validation/validator.ts` — Fail-closed Ajv Draft 2020-12 (`ajv` + `ajv-formats`) validation engine.
-  - `contracts/tests/contracts.test.ts` — Automated contract and fail-closed validation test suite.
-- **Stage 1 Governance Engine (`core/`):**
-  - `core/configuration/` — Draft 2020-12 system config validator (`validate-system-config.ts`).
-  - `core/policy/` — Fail-closed `L0`–`L4` Policy Evaluator (`policy-evaluator.ts`).
-  - `core/approvals/` — Non-self-approval gatekeeper (`approval-service.ts`).
-  - `core/audit/` — Append-only JSONL Audit Logger with secret redaction (`audit-logger.ts`).
-- **Stage 2 Local Model Infrastructure (`intelligence/`):**
-  - `intelligence/model-registry/` — Local open-weight model registry (`local-model.schema.json`, `local-models.json`, `local-model-registry.ts`) plus Stage 1 `models.json` validator.
-  - `intelligence/hardware/` — `HardwareManager` & `checkHardwareFit` for RAM, VRAM, storage, GPU, and runtime compatibility.
-  - `intelligence/runtime/` — `RuntimeManager`, trusted endpoint guard, and direct adapters for Ollama, llama.cpp, vLLM, SGLang, and compatible local servers.
-  - `intelligence/lifecycle/` — `ModelLifecycleManager` (availability, honest load/unload, priority queue, concurrency limits, circuit breaker & recovery).
-  - `intelligence/router/` — `ModelRouter` (capability/hardware/context routing with zero paid API fallback).
-  - `intelligence/tests/` — Mock HTTP server, hardware, lifecycle, routing, and security tests.
+### Currently Implemented (Automated-Test Verified)
+- **Foundational Governance & Contracts (`core/`, `contracts/`):**
+  - `core/constitution/TEJAURA_CONSTITUTION.md`, `core/identity/IDENTITY.md`, `core/permissions/PERMISSION_POLICY.md`, `core/configuration/system.json`
+  - JSON Schema Draft 2020-12 contracts & fail-closed Ajv validators (`contracts/schemas/`, `contracts/types/`, `contracts/validation/`)
+- **Stage 1 Policy, Approval & Audit Engine (`core/`):**
+  - Fail-closed `L0`–`L4` Policy Evaluator with closed action catalog (`core/policy/`)
+  - Non-self-approval gatekeeper (`core/approvals/`)
+  - Append-only JSONL Audit Logger with secret redaction and directory confinement (`core/audit/`)
+- **Stage 2 & 2A AirLLM-Primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`):**
+  - Strict Draft 2020-12 Local Model Registry (`local-models.json`), `HardwareManager`, `RuntimeManager`, `AirLlmRuntimeAdapter` (`PRIMARY_LOCAL_RUNTIME = 'airllm'`), `ModelLifecycleManager`, `ModelRouter`, and authenticated Python AirLLM worker protocol (`workers/airllm/`).
+  - *Note:* Tested against offline HTTP mocks (`MockAirLlmEngine`); physical GPU/NVMe weight inference with `RealAirLlmEngine` has not been hardware-verified here.
 - **Stage 2B Private Identity, Auth, RBAC & Secrets Foundation (`core/`):**
-  - `core/security/` — Draft 2020-12 security config & identity store validators, Argon2id hashing, AES-256-GCM encryption at rest, and HTTPS enforcement.
-  - `core/auth/` — Independent owner setup, username/email login, sliding-window rate limiting, `HttpOnly`/`Secure`/`SameSite` cookies, session lifecycle, extensible TOTP MFA & WebAuthn passkeys, and single-use account recovery.
-  - `core/rbac/` — Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) and `PolicyActor`/`TrustedReviewerContext` session bridges.
-  - `core/secrets/` — Isolated `SecretsManager` (`EnvSecretProvider` + AES-256-GCM vault) blocking agents/frontend and preserving `TEJAURA_AIRLLM_WORKER_TOKEN` separation.
-- **Technical Documentation:**
-  - `docs/ARCHITECTURE.md` — Modular target architecture and component boundaries.
-  - `docs/CONTRACTS.md` — Core Contracts specification, validation usage, extension guide, and versioning.
-  - `docs/SECURITY_MODEL.md` — Stage 1 security architecture and trust boundaries.
-  - `docs/AUTH_AND_SECRETS.md` — Stage 2B authentication, sessions, MFA/passkeys, RBAC, and secrets architecture.
-  - `docs/THREAT_MODEL.md` — Stage 2B security threat model and residual risks.
-  - `docs/LOCAL_MODELS.md` — Stage 2/2A local-model-first & AirLLM architecture, runtime matrix, and setup.
-  - `docs/ROADMAP.md` — Staged development plan from foundation to operable OS.
-- **Repository Hygiene:**
-  - `.gitignore` — Secure defaults preventing accidental exposure of secrets, keys, and local artifacts.
-  - Base web/Vite workspace scaffold (`package.json`, `index.html`, `src/`) preserved untouched until UI stages begin.
+  - Independent initial owner setup, Argon2id password hashing, `HttpOnly`/`Secure`/`SameSite` cookies, idle + absolute expiry, logout, session revocation, login rate limiting, extensible TOTP MFA + WebAuthn passkeys, single-use recovery codes, default-deny RBAC (`core/rbac/`), and AES-256-GCM encrypted `SecretsManager` (`core/secrets/`).
+- **Stage 3 Persistent Orchestration, Control Plane API & Phone-First UI (`control-plane/`, `server.ts`, `src/`):**
+  - **Persistent SQLite State (`control-plane/db/`):** Schema-migrated SQLite store (`node:sqlite`, WAL mode) persisting tasks, task events, execution attempts, worker leases, schedules, and approvals across restarts.
+  - **Governed Orchestrator (`control-plane/orchestrator/`):** Priority queues, idempotency keys, deadlines, bounded retries, abortable execution, lease recovery, and blocking automatic retries on non-idempotent external actions.
+  - **Authenticated HTTP API (`control-plane/server/`, `server.ts`):** Cookie sessions, CSRF (`X-TEJAURA-CSRF: 1` + Origin/Referer checks), sliding-window API rate limits, `64KB` JSON payload caps, production HTTPS enforcement, and read-only secret presence metadata (never secret values).
+  - **Mobile-First Owner Control Plane UI (`src/`):** Initial setup & one-time recovery codes, login (+ MFA) & recovery, Overview Dashboard, Task Center (create/inspect/cancel/confirm-retry), Approval Inbox (required reason + 2-step confirmation), Schedules, Model & Runtime Center (live availability probe), Read-Only System & Policy Inspector, Read-Only Audit Center, and Settings & Security.
 
-### Planned (Not Yet Implemented)
-- Phone-first owner control plane UI (`L3`/`L4` approval inbox & status inspector)
-- Sandboxed `L2` task execution runtime and modular skills
-- Autonomous agent orchestration loops (bounded by owner governance)
+### Planned / Not Yet Hardware- or Deployment-Verified
+- **Stage 4:** Sandboxed `L2` local workspace task runners, modular capability plugins, and dry-run mutation diffs.
+- **Stage 5:** Supervised `L3` external integrations, end-to-end penetration/security audit, and physical GPU/Android device deployment verification.
 
 ---
 
-## Repository Structure
-
-```text
-.
-├── .env.example                                # Environment variable template (no real secrets)
-├── .gitignore                                  # Secure ignore rules for secrets and build artifacts
-├── README.md                                   # Project overview, current status, and setup
-├── core/
-│   ├── constitution/
-│   │   └── TEJAURA_CONSTITUTION.md             # Governance principles and autonomy levels
-│   ├── identity/
-│   │   └── IDENTITY.md                         # TEJAURA identity, mission, and values
-│   ├── permissions/
-│   │   └── PERMISSION_POLICY.md                # Least-privilege rules and approval gates
-│   └── configuration/
-│       └── system.json                         # Initial validated system configuration
-├── contracts/
-│   ├── README.md                               # Core Contracts overview and usage
-│   ├── schemas/                                # JSON Schema Draft 2020-12 contracts
-│   ├── types/                                  # Strict TypeScript contract types
-│   ├── validation/                             # Fail-closed Ajv validation engine
-│   └── tests/                                  # Automated contract test suite
-├── intelligence/
-│   └── model-registry/
-│       ├── README.md                           # Model registry rules and schema contract
-│       └── models.json                         # Empty versioned model registry
-└── docs/
-    ├── ARCHITECTURE.md                         # Modular architecture specification
-    ├── CONTRACTS.md                            # Contracts reference and extension guide
-    └── ROADMAP.md                              # Staged implementation roadmap
-```
-
-*(Note: Existing web workspace files such as `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`, and `src/` remain untouched as the host workspace shell for future UI stages.)*
-
----
-
-## Setup & Validation
-
-At this stage, setup consists of cloning the repository, configuring local environment variables safely if needed later, and verifying configuration integrity.
+## Running & Initial Setup
 
 ### Prerequisites
-- Git
-- Node.js 20+ and npm (for workspace tooling and future TypeScript validation/build steps)
+- Node.js 22+ (uses built-in `node:sqlite`) and npm
+- Python 3.10+ (optional, for `workers/airllm/test_worker.py` or running the local AirLLM worker)
 
 ### Quick Start
-1. **Verify no secrets are tracked:**
-   Ensure any future local credentials live in `.env` (which is ignored by `.gitignore`) and never in tracked files.
+1. **Configure environment safely:**
+   Never commit `.env` or secret material. In production mode, set a strong `TEJAURA_SECRETS_MASTER_KEY` (and `TEJAURA_AIRLLM_WORKER_TOKEN` / `TEJAURA_AIRLLM_WORKER_URL` if attaching an external AirLLM worker):
    ```bash
    cp .env.example .env
    ```
-2. **Run contract tests, type checks, and build verification:**
+2. **Install dependencies and run full automated verification:**
    ```bash
    npm install
    npm test
    npm run lint
    npm run build
+   python3 workers/airllm/test_worker.py
    ```
-3. **Validate JSON configuration and contract schema files:**
+3. **Start the full-stack control plane server (port 3000):**
    ```bash
-   node -e "for (const f of ['core/configuration/system.json', 'intelligence/model-registry/models.json', 'contracts/schemas/task.schema.json', 'contracts/schemas/agent.schema.json', 'contracts/schemas/tool.schema.json', 'contracts/schemas/approval.schema.json', 'contracts/schemas/audit-event.schema.json']) { JSON.parse(require('fs').readFileSync(f, 'utf8')); } console.log('All JSON valid');"
+   npm run dev
    ```
-4. **Read the governance documents before contributing:**
-   Review `core/constitution/TEJAURA_CONSTITUTION.md`, `core/permissions/PERMISSION_POLICY.md`, `docs/CONTRACTS.md`, and `docs/ROADMAP.md` before proposing runtime modules.
+   Open `http://127.0.0.1:3000` (or from an Android phone on a trusted HTTPS/LAN tunnel) and complete **Initial Owner Account Setup** once, saving the single-use recovery codes offline.
 
 ---
 
@@ -153,6 +89,6 @@ At this stage, setup consists of cloning the repository, configuring local envir
 - [Auth & Secrets Architecture](docs/AUTH_AND_SECRETS.md)
 - [Stage 2B Threat Model](docs/THREAT_MODEL.md)
 - [Local Model Infrastructure](docs/LOCAL_MODELS.md)
-- [Model Registry Rules](intelligence/model-registry/README.md)
+- [Stage 3 Control Plane Guide](docs/CONTROL_PLANE_STAGE3.md)
 - [System Architecture](docs/ARCHITECTURE.md)
 - [Development Roadmap](docs/ROADMAP.md)

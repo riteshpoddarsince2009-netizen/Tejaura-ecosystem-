@@ -29,7 +29,11 @@ import {
 } from '../../core/audit/index.ts';
 import systemConfigDefault from '../../core/configuration/system.json' with { type: 'json' };
 import { POLICY_ACTION_CATALOG } from '../../core/policy/index.ts';
-import { authorizeRbac, type RbacPrincipal } from '../../core/rbac/index.ts';
+import {
+  ROLE_PERMISSIONS,
+  authorizeRbac,
+  type RbacPrincipal,
+} from '../../core/rbac/index.ts';
 import {
   EnvSecretProvider,
   FileEncryptedVaultBackend,
@@ -187,7 +191,7 @@ function buildDefaultComputeNodes(): ComputeNode[] {
       available_vram_mb: 0,
       total_storage_mb: 102400,
       available_storage_mb: 65536,
-      supported_runtimes: ['airllm', 'ollama', 'llama.cpp'],
+      supported_runtimes: ['airllm', 'ollama', 'llama_cpp'],
       installed_model_ids: [],
       last_seen_at: new Date().toISOString(),
     },
@@ -202,7 +206,9 @@ function getDefaultTrustedEndpoints(): TrustedRuntimeEndpoint[] {
       endpoint_id: 'airllm_primary_worker',
       runtime_type: 'airllm',
       base_url: airllmUrl.trim(),
-      owner_approved: true,
+      node_id: 'local_host_airllm',
+      enabled: true,
+      requires_auth: true,
       auth_token_env_var: 'TEJAURA_AIRLLM_WORKER_TOKEN',
     });
   }
@@ -329,9 +335,10 @@ export function createControlPlaneApp(
     runtime,
   });
 
+  const existingIdentity = identityStore.load();
   const orchestrator = new TaskOrchestrator({
     store,
-    designatedOwnerId: 'owner_primary',
+    designatedOwnerId: existingIdentity.owner?.owner_id ?? 'owner_primary',
     systemConfig,
     auditLogger,
     registry,
@@ -642,6 +649,8 @@ export function createControlPlaneApp(
       return;
     }
 
+    orchestrator.bindDesignatedOwnerId(result.owner_id);
+
     res.status(201).json({
       ok: true,
       owner_id: result.owner_id,
@@ -837,6 +846,11 @@ export function createControlPlaneApp(
         principal: session.toPrincipal(),
         correlation_id: req.tejauraCorrelationId ?? 'corr_sec_meta',
       });
+      const identitySnap = identityStore.load();
+      const activeSessionsCount = identitySnap.sessions.filter(
+        (s) => s.revoked_at === null && new Date(s.expires_at).getTime() > clock().getTime(),
+      ).length;
+      const sysCfg = systemConfig as Record<string, unknown>;
 
       res.json({
         ok: true,
@@ -885,10 +899,32 @@ export function createControlPlaneApp(
           endpoint_id: ep.endpoint_id,
           runtime_type: ep.runtime_type,
           base_url: ep.base_url,
-          owner_approved: ep.owner_approved,
+          node_id: ep.node_id,
+          enabled: ep.enabled,
+          requires_auth: ep.requires_auth ?? false,
           auth_token_env_var: ep.auth_token_env_var ?? null,
         })),
         secrets_inventory: secretsMeta.ok ? secretsMeta.value : [],
+        system_governance: {
+          system: sysCfg.system ?? null,
+          principles: sysCfg.principles ?? null,
+          governance: sysCfg.governance ?? null,
+          approval_gates: sysCfg.approvalGates ?? null,
+          security: sysCfg.security ?? null,
+        },
+        rbac_roles: ROLE_PERMISSIONS,
+        auth_posture: {
+          mfa_enrolled_count:
+            identitySnap.owner?.mfa_factors.filter((f) => f.enabled).length ?? 0,
+          recovery_codes_remaining:
+            identitySnap.owner?.recovery_codes.filter((c) => c.used_at === null).length ?? 0,
+          active_sessions_count: activeSessionsCount,
+          cookie_name: securityConfig.session.cookieName,
+          same_site: securityConfig.session.sameSite,
+          http_only: securityConfig.session.httpOnly,
+          secure_cookie: securityConfig.session.secure,
+          enforce_https_in_deployment: securityConfig.transport.enforceHttpsInDeployment,
+        },
       });
     },
   );
@@ -942,7 +978,7 @@ export function createControlPlaneApp(
       const description = sanitizeString(req.body.description, 2, 2000);
       const action = sanitizeString(req.body.action, 2, 80);
       const resourceId = sanitizeString(req.body.resource_id, 2, 160);
-      const taskType = sanitizeString(req.body.type, 2, 64) ?? action;
+      const taskType = sanitizeString(req.body.type, 2, 64) ?? action?.replace(/:/g, '.') ?? null;
       const environment = req.body.environment as ExecutionEnvironment;
       const autonomyLevel = req.body.autonomy_level as AutonomyLevel;
 
@@ -1191,7 +1227,7 @@ export function createControlPlaneApp(
       }
 
       const template: ScheduleTaskTemplate = {
-        type: sanitizeString(tmplRaw.type, 2, 64) ?? tmplAction,
+        type: sanitizeString(tmplRaw.type, 2, 64) ?? tmplAction.replace(/:/g, '.'),
         title: tmplTitle,
         description: tmplDesc,
         action: tmplAction,
@@ -1347,7 +1383,15 @@ export function createControlPlaneApp(
         primary_runtime: PRIMARY_LOCAL_RUNTIME,
         models,
         compute_nodes: hardware.listNodes(),
-        trusted_endpoints: runtime.listTrustedEndpoints(),
+        trusted_endpoints: runtime.listTrustedEndpoints().map((ep) => ({
+          endpoint_id: ep.endpoint_id,
+          runtime_type: ep.runtime_type,
+          base_url: ep.base_url,
+          node_id: ep.node_id,
+          enabled: ep.enabled,
+          requires_auth: ep.requires_auth ?? false,
+          auth_token_env_var: ep.auth_token_env_var ?? null,
+        })),
         lifecycle_stats: lifecycle.getStats(),
       });
     },

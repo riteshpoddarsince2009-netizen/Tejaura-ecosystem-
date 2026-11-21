@@ -42,6 +42,16 @@ export interface SecretInventoryItem {
   updated_at: string | null;
 }
 
+export interface TrustedEndpointItem {
+  endpoint_id: string;
+  runtime_type: string;
+  base_url: string;
+  node_id: string;
+  enabled: boolean;
+  requires_auth: boolean;
+  auth_token_env_var: string | null;
+}
+
 export interface SystemOverviewResponse {
   ok: true;
   generated_at: string;
@@ -76,14 +86,40 @@ export interface SystemOverviewResponse {
     trusted_endpoints: number;
   };
   action_catalog: ActionCatalogItem[];
-  trusted_endpoints: Array<{
-    endpoint_id: string;
-    runtime_type: string;
-    base_url: string;
-    owner_approved: boolean;
-    auth_token_env_var: string | null;
-  }>;
+  trusted_endpoints: TrustedEndpointItem[];
   secrets_inventory: SecretInventoryItem[];
+  system_governance?: {
+    system: Record<string, unknown> | null;
+    principles: Record<string, boolean> | null;
+    governance: {
+      humanOwnerControl?: boolean;
+      allowAgentSelfPermission?: boolean;
+      allowAgentSelfApproval?: boolean;
+      failClosedOnPolicyError?: boolean;
+      defaultAutonomyLevel?: AutonomyLevel;
+      maxAutonomousLevel?: AutonomyLevel;
+      autonomyLevels?: Record<
+        AutonomyLevel,
+        { id: string; description: string }
+      >;
+    } | null;
+    approval_gates: Record<
+      string,
+      { required: boolean; autonomyLevel: AutonomyLevel; allowAutoApprove: boolean }
+    > | null;
+    security: Record<string, unknown> | null;
+  };
+  rbac_roles?: Record<string, readonly string[]>;
+  auth_posture?: {
+    mfa_enrolled_count: number;
+    recovery_codes_remaining: number;
+    active_sessions_count: number;
+    cookie_name: string;
+    same_site: string;
+    http_only: boolean;
+    secure_cookie: boolean;
+    enforce_https_in_deployment: boolean;
+  };
 }
 
 export interface OrchestratedTask {
@@ -178,20 +214,20 @@ export interface ApprovalItem {
   task_id: string;
   action: string;
   requested_by: string;
-  reviewer_id: string;
+  requested_at: string;
   status: 'pending' | 'approved' | 'rejected' | 'expired';
+  reviewed_by: string | null;
+  reviewed_at: string | null;
   reason: string;
   scope: {
     resources: string[];
     permissions: string[];
     single_use: boolean;
-    expires_at: string;
+    expires_at: string | null;
   };
-  decision_reason?: string;
   environment: ExecutionEnvironment;
-  created_at: string;
-  decided_at: string | null;
   consumed_at: string | null;
+  consumed_for_task_id: string | null;
 }
 
 export interface ModelInventoryItem {

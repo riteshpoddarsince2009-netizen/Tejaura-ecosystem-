@@ -1,7 +1,7 @@
 # TEJAURA Modular System Architecture
 
-**Document Version:** 1.3.0  
-**Implementation Status:** Stage 2B — Governance, Contracts, Policy Engine, AirLLM-Primary Local Model Infrastructure, and Private Identity/Auth/RBAC/Secrets Foundation Implemented (Pre-Alpha). Control-plane UI (`Stage 3`), sandboxed task execution (`Stage 4`), and autonomous agents remain **planned**.
+**Document Version:** 1.4.0  
+**Implementation Status:** Stage 3 — Governance, Contracts, Policy Engine, AirLLM-Primary Local Model Infrastructure, Private Identity/Auth/RBAC/Secrets, Persistent SQLite Orchestrator, Control Plane HTTP API, and Phone-First Owner Control Plane UI Implemented (Pre-Alpha). Sandboxed `L2` task plugins (`Stage 4`) and autonomous agent loops (`Stage 5`) remain **planned**.
 
 ---
 
@@ -9,11 +9,10 @@
 
 TEJAURA is structured as a layered, modular operating system where **governance sits above intelligence**, and **execution sits behind explicit policy gates**:
 
-- **Governance First:** No execution layer can operate without consulting `core/` policies and configuration.
-- **Phone as Control Device, Compute on Owner Nodes:** The Android phone is the owner's **control device** for inspection, approvals, and task dispatch—not the large-model inference machine. Large open-weight inference runs on owner-controlled local or remote compute nodes.
-- **AirLLM Primary Engine, Zero Paid Fallback:** AirLLM (`workers/airllm/`) is TEJAURA's primary model inference engine for compatible open-weight text models, supported alongside secondary local runtimes (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local servers). TEJAURA never falls back to paid third-party AI APIs.
-- **Strict Module Boundaries:** TypeScript governance/routing stays cleanly separated from Python AirLLM dependencies via an authenticated internal HTTP worker protocol.
-- **Testability Without GPU or Model Weights:** Every governance, auth, RBAC, secrets, routing, lifecycle, and AirLLM protocol path is unit/integration-testable using deterministic mocks without downloading multi-GB weights.
+- **Governance First:** No execution or orchestration path operates without consulting `core/` policies, RBAC, and approvals.
+- **Phone as Control Device, Compute on Owner Nodes:** The Android phone browser (`src/`) is the owner's control surface for inspection, approvals, scheduling, and task dispatch. Open-weight inference runs on owner-controlled local or remote compute nodes.
+- **AirLLM Primary Engine, Zero Paid Fallback:** AirLLM (`workers/airllm/`) is TEJAURA's primary model inference engine for compatible open-weight text models, supported alongside secondary local adapters (Ollama, llama.cpp, vLLM, SGLang, OpenAI-compatible local servers). Paid third-party AI APIs are disabled and blocked.
+- **Strict Trust Boundaries:** The React frontend communicates solely via `HttpOnly` cookie sessions + `X-TEJAURA-CSRF: 1` over same-origin `/api/*` routes. Master keys, recovery hashes, and `TEJAURA_AIRLLM_WORKER_TOKEN` never leave the server process.
 
 ---
 
@@ -21,8 +20,17 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 
 ```text
 +-------------------------------------------------------------------+
-|                   4. INTERFACES (Planned - Stage 3)               |
-|   Android / Phone-First Control UI  |  Approval Inbox  |  CLI     |
+|       4. PHONE-FIRST OWNER CONTROL PLANE UI (Implemented - Stg 3) |
+|   React SPA (375px Mobile + Desktop): Auth | Overview | Tasks     |
+|   Approval Inbox | Schedules | Models & Probe | Policy | Audit    |
++-------------------------------------------------------------------+
+                                  |  (HttpOnly Cookie + X-TEJAURA-CSRF)
+                                  v
++-------------------------------------------------------------------+
+|   3. PERSISTENT CONTROL PLANE & ORCHESTRATOR (Implemented - Stg 3)|
+|   control-plane/server/: Auth Middleware, CSRF, Rate Limit, 64KB  |
+|   control-plane/orchestrator/: Leases, Retries, Schedules, Worker |
+|   control-plane/db/: Schema-Migrated SQLite WAL Persistence       |
 +-------------------------------------------------------------------+
                                   |
                                   v
@@ -43,7 +51,7 @@ TEJAURA is structured as a layered, modular operating system where **governance 
                                   |  (X-TEJAURA-Worker-Token / HTTPS or 127.0.0.1)
                                   v
 +-------------------------------------------------------------------+
-|     3. ISOLATED PYTHON AIRLLM WORKER (Implemented - Stage 2A)     |
+|     5. ISOLATED PYTHON AIRLLM WORKER (Implemented - Stage 2A)     |
 |   workers/airllm/: Authenticated HTTP Control Plane               |
 |   RealAirLlmEngine (airllm.AutoModel - lazy) | MockAirLlmEngine   |
 +-------------------------------------------------------------------+
@@ -53,38 +61,30 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 
 ## 3. Module Responsibilities & Verification Status
 
-### 3.1 `core/` & `contracts/` *(Implemented & Tested)*
+### 3.1 `core/` & `contracts/` *(Implemented & Automated-Test Verified)*
 - **`contracts/`:** JSON Schema Draft 2020-12 contracts (`task`, `agent`, `tool`, `approval`, `audit-event`), TypeScript types, and fail-closed Ajv validator.
-- **`core/constitution/`, `core/identity/`, `core/permissions/`:** Constitutional rules, `L0`–`L4` autonomy levels, and non-self-approval policy.
-- **`core/configuration/`:** Draft 2020-12 `system.json` validator rejecting secrets and unsafe autonomy overrides.
-- **`core/security/`:** Draft 2020-12 `security-config` & `identity-store` schemas/validators, Argon2id hashing, AES-256-GCM authenticated encryption, and HTTPS transport enforcement.
-- **`core/auth/`:** Independent once-only owner setup, username/email login, sliding-window rate limiter, `HttpOnly`/`Secure`/`SameSite` session cookies, expiry/logout/revocation, extensible TOTP MFA & WebAuthn passkey modules, and single-use account recovery.
-- **`core/rbac/`:** Default-deny RBAC (`owner`, `operator_readonly`, `agent_restricted`, `worker_service`) and `PolicyActor`/`TrustedReviewerContext` session bridges.
-- **`core/secrets/`:** Isolated `SecretsManager` (`EnvSecretProvider` + AES-256-GCM vault) blocking agents/frontend and separating `TEJAURA_AIRLLM_WORKER_TOKEN` from owner auth.
-- **`core/policy/`, `core/approvals/`, `core/audit/`:** Deterministic fail-closed Policy Evaluator, single-use human-owner Approval Gatekeeper, and append-only JSONL Audit Logger (with typed auth, permission-change, and secret-access emitters).
+- **`core/constitution/`, `core/identity/`, `core/permissions/`, `core/configuration/`:** Constitutional rules, `L0`–`L4` autonomy levels, non-self-approval policy, and `system.json` validation.
+- **`core/security/`, `core/auth/`, `core/rbac/`, `core/secrets/`:** Argon2id identity & sessions, `HttpOnly`/`Secure`/`SameSite` cookies, TOTP MFA & WebAuthn passkeys, single-use recovery, default-deny RBAC, and AES-256-GCM encrypted `SecretsManager`.
+- **`core/policy/`, `core/approvals/`, `core/audit/`:** Fail-closed Policy Evaluator, single-use owner Approval Gatekeeper, and append-only JSONL Audit Logger.
 
-### 3.2 `intelligence/` *(Implemented & Mock-Tested — Stage 2A)*
-- **`intelligence/model-registry/`:**
-  - Stage 1 baseline (`models.json` / `model-registry.schema.json`) preserved.
-  - Stage 2A local-first registry (`local-model.schema.json`, `local-models.json`, `local-model-registry.ts`) requiring `model_repository` (`repo_id`, `revision`, `source`), `compatibility_status` (`verified | untested | unsupported`), `modality`, `runtime_type`, `hardware_requirements`, `quantization`, `license`, and `local_model_path`. Only `verified` `text` models can be enabled.
-- **`intelligence/hardware/`:** `ComputeNode` modeling and fail-closed `checkHardwareFit` (RAM, VRAM, storage, GPU, online status, runtime support).
-- **`intelligence/runtime/`:** `RuntimeManager`, trusted endpoint allowlist (`endpoint-guard.ts`), `AirLlmRuntimeAdapter` (primary), and secondary adapters for Ollama, llama.cpp, vLLM, SGLang, and compatible servers.
-- **`intelligence/lifecycle/` & `intelligence/router/`:** Availability probing, honest load/unload requests, bounded priority queue, concurrency caps, failure circuit breaker, and `ModelRouter` favoring `airllm` without paid API fallback.
+### 3.2 `intelligence/` & `workers/airllm/` *(Implemented & Mock-Verified)*
+- **`intelligence/`:** Draft 2020-12 Local Model Registry, `HardwareManager`, `RuntimeManager` with `AirLlmRuntimeAdapter` primary + secondary local runtimes, `ModelLifecycleManager`, and `ModelRouter`.
+- **`workers/airllm/`:** Authenticated Python HTTP worker (`MockAirLlmEngine` automated-test verified; `RealAirLlmEngine` physical GPU inference pending hardware verification).
 
-### 3.3 `workers/airllm/` *(Implemented; Protocol Tested with Mock Engine — Live GPU Inference Not Yet Verified)*
-- Runs separately from the TypeScript core on owner-controlled compute.
-- Exposes authenticated `/internal/health`, `/internal/models`, `/internal/models/load`, `/internal/models/unload`, `/internal/infer`, and `/internal/requests/cancel`.
-- **Tested:** Protocol auth, compatibility/modality rejection, load/infer/unload, timeouts, and cancellation against `MockAirLlmEngine`.
-- **Not Yet Hardware-Verified:** Executing `RealAirLlmEngine` (`airllm.AutoModel`) end-to-end against downloaded model weights on physical GPU/NVMe hardware.
+### 3.3 `control-plane/`, `server.ts` & `src/` *(Implemented & Automated-Test Verified — Stage 3)*
+- **`control-plane/db/`:** Schema-migrated SQLite store (`node:sqlite`, WAL mode) persisting tasks, task events, execution attempts, leases, schedules, and approvals outside public web roots.
+- **`control-plane/orchestrator/`:** Priority task queue, idempotency deduplication, bounded concurrency/leases, crash lease recovery, `AbortSignal` timeouts/cancellation, recurring schedule triggers, and non-idempotent retry blocks (`NON_IDEMPOTENT_CONFIRMATION_REQUIRED`).
+- **`control-plane/server/` & `server.ts`:** Express control-plane HTTP API integrated with Stage 2B auth/RBAC/secrets/audit, CSRF protection, sliding-window rate limiting, and Vite dev / static production hosting on port `3000`.
+- **`src/`:** Mobile-first React + Tailwind control plane UI covering all owner authentication, task, approval, scheduling, model probing, policy inspection, audit trail, and security management views.
 
-### 3.4 `interfaces/` & Sandboxed Execution *(Planned — Stage 3+)*
-- Phone-first Android / mobile control-plane UI, owner approval inbox, and `L2` sandboxed task execution runtime are **not yet implemented**.
+### 3.4 Sandboxed Execution Plugins *(Planned — Stage 4+)*
+- Sandboxed `L2` task plugins with workspace path allowlists and dry-run diffs remain **not yet implemented**.
 
 ---
 
 ## 4. Non-Negotiable Security Boundaries
 
-- **Zero Secrets in Source or Registry:** Worker authentication uses environment variable names (`auth_token_env_var` -> `TEJAURA_AIRLLM_WORKER_TOKEN`), never hardcoded tokens.
-- **Untrusted Model Output:** All completions carry `untrusted_model_output: true` and cannot alter permissions, endpoints, registry entries, or `system.json`.
-- **Explicit Compatibility & Modality Gates:** Untested, unsupported, or non-text (`image_generation`, unverified `multimodal_vision`, `audio`) models fail closed before dispatch.
+- **Zero Secrets in Source, Registry, or Frontend:** Server-only secrets (`TEJAURA_SECRETS_MASTER_KEY`, `TEJAURA_AIRLLM_WORKER_TOKEN`, vault ciphertexts, password hashes) never appear in API payloads, audit logs, or React/browser storage.
+- **Untrusted Model Output:** Completions carry `untrusted_model_output: true` and cannot alter permissions, endpoints, registry entries, or `system.json`.
+- **No Agent Self-Approval or L4 Autonomy:** `ApprovalService` enforces designated-owner identity (`bindDesignatedOwnerId`) and rejects `requested_by === reviewer.actor_id`.
 - **Zero Paid Third-Party AI APIs:** Commercial API hosts are blocked at endpoint validation and omitted from all fallback paths.

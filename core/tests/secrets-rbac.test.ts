@@ -321,12 +321,19 @@ test('FileEncryptedVaultBackend stores AES-256-GCM ciphertext on disk and refuse
     assert.match(rawFile, /"alg": "aes-256-gcm"/);
 
     // No secrets exist inside frontend src/ files.
-    const srcFiles = fs.readdirSync(path.resolve('src'));
-    for (const file of srcFiles) {
-      const content = fs.readFileSync(path.resolve('src', file), 'utf8');
-      assert.equal(content.includes('TEJAURA_AIRLLM_WORKER_TOKEN'), false);
-      assert.equal(content.includes('TEJAURA_SECRETS_MASTER_KEY'), false);
-    }
+    const scanSrcDir = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scanSrcDir(fullPath);
+        } else {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          assert.equal(content.includes('TEJAURA_AIRLLM_WORKER_TOKEN'), false);
+          assert.equal(content.includes('TEJAURA_SECRETS_MASTER_KEY'), false);
+        }
+      }
+    };
+    scanSrcDir(path.resolve('src'));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
