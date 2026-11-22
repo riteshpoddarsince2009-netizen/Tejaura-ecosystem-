@@ -87,7 +87,6 @@ export function TaskCenterView({
   const [timeoutMs, setTimeoutMs] = useState(30000);
   const [idempotencyKey, setIdempotencyKey] = useState('');
   const [idempotentAction, setIdempotentAction] = useState(true);
-  const [ownerConfirmedL4, setOwnerConfirmedL4] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
 
@@ -139,7 +138,6 @@ export function TaskCenterView({
       if (!spec.allowed_environments.includes(environment)) {
         setEnvironment(spec.allowed_environments[0] ?? 'local');
       }
-      setOwnerConfirmedL4(false);
     }
   }
 
@@ -172,7 +170,6 @@ export function TaskCenterView({
         max_retries: maxRetries,
         timeout_ms: timeoutMs,
         input: promptText.trim() ? { prompt: promptText.trim() } : {},
-        owner_confirmed_l4: ownerConfirmedL4,
       });
       setTitle('');
       setDescription('');
@@ -504,15 +501,10 @@ export function TaskCenterView({
               </label>
 
               {(autonomyLevel === 'L4' || selectedSpec?.owner_exclusive) && (
-                <label className="inline-flex items-center gap-2 text-xs text-amber-300 min-h-[36px]">
-                  <input
-                    type="checkbox"
-                    checked={ownerConfirmedL4}
-                    onChange={(e) => setOwnerConfirmedL4(e.target.checked)}
-                    className="h-4 w-4 rounded border-amber-500 bg-[#030712] text-indigo-600"
-                  />
-                  <span>Explicit L4 owner confirmation</span>
-                </label>
+                <p className="text-xs text-amber-300 min-h-[36px] flex items-center">
+                  L4 owner-exclusive tasks are queued to the Owner Approval Inbox
+                  and run only after a separate owner decision.
+                </p>
               )}
             </div>
 

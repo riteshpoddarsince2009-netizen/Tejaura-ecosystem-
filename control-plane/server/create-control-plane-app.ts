@@ -611,6 +611,22 @@ export function createControlPlaneApp(
     };
   }
 
+  function sendManagementError(
+    res: Response,
+    outcome: { code: string; error: string; http_status: number; approval?: unknown },
+  ): void {
+    const payload: Record<string, unknown> = {
+      ok: false,
+      code: outcome.code,
+      error: outcome.error,
+    };
+    if (outcome.approval) {
+      payload.approval = outcome.approval;
+      payload.requires_approval = true;
+    }
+    res.status(outcome.http_status).json(payload);
+  }
+
   // -------------------- Public / Auth Routes --------------------
 
   app.get('/api/health', (_req: Request, res: Response) => {
@@ -1366,7 +1382,6 @@ export function createControlPlaneApp(
           max_retries: maxRetries,
           timeout_ms: timeoutMs,
           input: inputObj,
-          owner_confirmed_l4: req.body.owner_confirmed_l4 === true,
         },
         {
           actor: req.tejauraSession!.toPolicyActor(),
@@ -2256,12 +2271,17 @@ export function createControlPlaneApp(
         res.status(400).json({ ok: false, code: 'INVALID_BODY', error: 'Worker payload must be a JSON object.' });
         return;
       }
-      const outcome = management.registerOrUpdateWorker(req.body, {
-        actor: req.tejauraSession!.toPolicyActor(),
-        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_create',
-      });
+      const outcome = management.registerOrUpdateWorker(
+        req.body,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_worker_create',
+        },
+        undefined,
+        typeof req.body.approval_id === 'string' ? req.body.approval_id : undefined,
+      );
       if (!outcome.ok) {
-        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        sendManagementError(res, outcome);
         return;
       }
       res.status(201).json({ ok: true, worker: outcome.data });
@@ -2284,9 +2304,10 @@ export function createControlPlaneApp(
           correlation_id: req.tejauraCorrelationId ?? 'corr_worker_update',
         },
         workerId,
+        typeof req.body.approval_id === 'string' ? req.body.approval_id : undefined,
       );
       if (!outcome.ok) {
-        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        sendManagementError(res, outcome);
         return;
       }
       res.json({ ok: true, worker: outcome.data });
@@ -2302,12 +2323,17 @@ export function createControlPlaneApp(
         res.status(400).json({ ok: false, code: 'INVALID_WORKER_TOGGLE', error: 'Worker ID and boolean enabled flag required.' });
         return;
       }
-      const outcome = management.toggleWorker(workerId, req.body.enabled, {
-        actor: req.tejauraSession!.toPolicyActor(),
-        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_toggle',
-      });
+      const outcome = management.toggleWorker(
+        workerId,
+        req.body.enabled,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_worker_toggle',
+        },
+        typeof req.body.approval_id === 'string' ? req.body.approval_id : undefined,
+      );
       if (!outcome.ok) {
-        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        sendManagementError(res, outcome);
         return;
       }
       res.json({ ok: true, worker: outcome.data });
@@ -2344,12 +2370,22 @@ export function createControlPlaneApp(
         res.status(400).json({ ok: false, code: 'INVALID_WORKER_ID', error: 'Invalid worker ID.' });
         return;
       }
-      const outcome = management.deleteWorker(workerId, {
-        actor: req.tejauraSession!.toPolicyActor(),
-        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_delete',
-      });
+      const approvalId =
+        typeof req.query.approval_id === 'string'
+          ? req.query.approval_id
+          : isPlainObject(req.body) && typeof req.body.approval_id === 'string'
+            ? req.body.approval_id
+            : undefined;
+      const outcome = management.deleteWorker(
+        workerId,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_worker_delete',
+        },
+        approvalId,
+      );
       if (!outcome.ok) {
-        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        sendManagementError(res, outcome);
         return;
       }
       res.json({ ok: true, ...outcome.data });
@@ -2442,7 +2478,6 @@ export function createControlPlaneApp(
           notes: typeof bodyObj.notes === 'string' ? bodyObj.notes : undefined,
           approval_id:
             typeof bodyObj.approval_id === 'string' ? bodyObj.approval_id : undefined,
-          owner_confirmed_l4: bodyObj.owner_confirmed_l4 === true,
         },
         {
           actor: req.tejauraSession!.toPolicyActor(),

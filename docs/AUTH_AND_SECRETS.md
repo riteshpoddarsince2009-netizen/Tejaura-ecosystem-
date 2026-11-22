@@ -84,7 +84,7 @@ TEJAURA Stage 2B introduces an independent, owner-controlled identity, session, 
 
 - `SecretsManager` (`core/secrets/`) is completely separated from owner authentication and configuration files:
   - `EnvSecretProvider`: reads explicitly allowlisted environment variables (default: `TEJAURA_AIRLLM_WORKER_TOKEN`).
-  - `FileEncryptedVaultBackend` / `InMemoryEncryptedVaultBackend`: encrypts stored credentials with **AES-256-GCM** using HKDF-SHA256 derived keys from `TEJAURA_SECRETS_MASTER_KEY` and AAD bound to `secret:<key>:<scope>`. Refuses web-served directories (`src/`, `public/`, `dist/`, `build/`, `static/`, `www/`).
+  - `FileEncryptedVaultBackend` / `InMemoryEncryptedVaultBackend`: encrypts stored credentials with **AES-256-GCM** using HKDF-SHA256 derived keys from `TEJAURA_SECRETS_MASTER_KEY` and AAD bound to `secret:<key>:<scope>`. Refuses web-served directories (`src/`, `public/`, `dist/`, `build/`, `static/`, `www/`), writes atomically through a `0600` temporary file plus rename, and rejects malformed vault entries on load.
 - **Zero Exposure Guarantees:**
   - `agent_restricted` and `actor_type === 'agent'` are unconditionally blocked from `secrets:read`, `secrets:write`, and `worker:airllm:token`.
   - Frontend code (`src/`) receives zero secrets and zero `.env` credentials.

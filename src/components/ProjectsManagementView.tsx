@@ -145,7 +145,7 @@ export function ProjectsManagementView({
       });
       if (res.requires_approval && res.approval) {
         setNotice(
-          `Production deployment for "${res.project.name}" requires explicit owner approval (${res.approval.id}). Review & approve in Approval Inbox.`,
+          `${targetEnv} deployment for "${res.project.name}" requires explicit owner approval (${res.approval.id}). Review & approve in Approval Inbox.`,
         );
       } else {
         setNotice(`Project "${res.project.name}" deployed to ${res.project.environment}.`);

@@ -137,6 +137,37 @@ export class RuntimeManager {
   }
 
   /**
+   * Startup-only rehydration of endpoints previously persisted after an
+   * authenticated owner-approved `runtime:manage` action. This is not an
+   * authorization path; live callers must use `registerTrustedEndpoint`.
+   */
+  restorePersistedEndpoints(endpoints: readonly TrustedRuntimeEndpoint[]): {
+    restored: number;
+    rejected: Array<{ endpoint_id: string; error: string }>;
+  } {
+    let restored = 0;
+    const rejected: Array<{ endpoint_id: string; error: string }> = [];
+
+    for (const endpoint of endpoints) {
+      const validated = this.validateEndpointRecord(endpoint);
+      if (!validated.ok || !validated.normalized) {
+        rejected.push({
+          endpoint_id: endpoint.endpoint_id,
+          error: validated.error ?? 'Invalid runtime endpoint record.',
+        });
+        continue;
+      }
+      this.trustedEndpoints.set(
+        validated.normalized.endpoint_id,
+        validated.normalized,
+      );
+      restored += 1;
+    }
+
+    return { restored, rejected };
+  }
+
+  /**
    * Registers or updates a trusted runtime endpoint under strict L3 `runtime:manage` policy + owner approval.
    */
   registerTrustedEndpoint(

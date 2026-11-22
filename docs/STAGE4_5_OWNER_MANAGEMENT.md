@@ -42,5 +42,24 @@ SQLite migration `v3` (`003_stage45_management_center`) persists:
 - **Agent Management**: `GET/POST /api/agents`, `PATCH /api/agents/:id`, `POST /api/agents/:id/status`, `GET /api/agents/:id/history`
 - **Model Management**: `GET/POST /api/models`, `PATCH/DELETE /api/models/:id`, `POST /api/models/:id/toggle`, `POST /api/models/:id/role`, `POST /api/models/:id/verify-install`
 - **Worker & Compute Management**: `GET/POST /api/workers`, `PATCH/DELETE /api/workers/:id`, `POST /api/workers/:id/toggle`, `POST /api/workers/:id/probe`
-- **Project Management**: `GET/POST /api/projects`, `PATCH/DELETE /api/projects/:id`, `POST /api/projects/:id/deploy` (mandatory owner-approved `ApprovalService` gate for `production` deployments)
+- **Project Management**: `GET/POST /api/projects`, `PATCH/DELETE /api/projects/:id`, `POST /api/projects/:id/deploy` (mandatory owner-approved `ApprovalService` gate for `staging` and `production` deployments)
 - **System Administration**: `GET /api/system/admin`, `PATCH /api/system/config`, `GET /api/system/logs`, `GET/POST /api/system/backups`, `POST /api/system/backups/:id/restore`
+
+---
+
+## Part 4 — Stage 4.5 Security Audit Repairs
+
+### Approval Integrity
+- Removed fabricated owner identities and automatic approval decisions from runtime bootstrap and management flows. The control plane never decides an approval on the owner's behalf.
+- Worker registration, toggle, and delete now create a single-use `runtime:manage` approval bound to the exact endpoint and `runtime:manage:approved` scope. The HTTP response is `202` with `requires_approval: true` and the pending approval record.
+- Staging and production project deployments create a single-use `deploy:staging` / `deploy:production` approval bound to the project and target environment. The approval inbox decision endpoint performs the deployment after verifying the bound scope, environment, resource, reviewer, expiry, and single-use state.
+- The `POST /api/tasks` route no longer accepts a client-supplied `owner_confirmed_l4` flag. L4 tasks always enter `waiting_for_approval`; execution requires a linked approval reviewed by the designated owner.
+- Management UI actions surface the pending approval ID and retry with `approval_id` only after the owner approves in the Approval Inbox.
+
+### Persistence and Secret Storage
+- Startup rehydration of persisted models and worker endpoints uses dedicated restore paths that validate records without minting owner identities or approvals. Live mutations still require the full policy and approval path.
+- Encrypted secret vault writes are atomic (`tmp` file + `rename`), restricted to `0600`, and reject malformed entries on load.
+- Raw worker tokens remain environment-only; the management API and UI expose presence metadata and environment variable names, never token values.
+
+### Test Coverage
+`control-plane/tests/stage45-auth-and-management.test.ts` covers auth transport modes, CSRF, restarts, sessions, password rotation, MFA, recovery codes, agent L4 rejection, model registration/verification, worker SSRF/token/probe behavior, staging and production approval gates, backups, persistence, audit logs, and the L4 client-flag bypass regression.

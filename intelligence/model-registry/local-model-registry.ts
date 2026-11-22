@@ -371,6 +371,57 @@ export class LocalModelRegistry {
   }
 
   /**
+   * Startup-only rehydration of models that were previously persisted after an
+   * authenticated owner mutation. This is not an authorization path: HTTP and
+   * task callers must use `registerModel`, which enforces L4 owner policy.
+   */
+  restorePersistedModels(entries: readonly LocalModelEntry[]): {
+    restored: number;
+    rejected: Array<{ model_id: string; error: string }>;
+  } {
+    let restored = 0;
+    const rejected: Array<{ model_id: string; error: string }> = [];
+
+    for (const entry of entries) {
+      const safeEntry: LocalModelEntry = {
+        ...cloneEntry(entry),
+        enabled:
+          entry.enabled && entry.compatibility_status === 'verified',
+      };
+
+      const candidateDoc: LocalModelRegistryDocument = {
+        schema_version: '1.0.0',
+        registry_version: '0.3.0',
+        last_updated: new Date().toISOString(),
+        preferred_runtime: 'airllm',
+        local_first_only: true,
+        allow_paid_third_party_apis: false,
+        allow_secrets: false,
+        models: [
+          ...[...this.models.values()].filter(
+            (m) => m.model_id !== safeEntry.model_id,
+          ),
+          safeEntry,
+        ],
+      };
+
+      const validation = validateLocalModelRegistry(candidateDoc);
+      if (!validation.valid) {
+        rejected.push({
+          model_id: entry.model_id,
+          error: validation.errors.map((e) => e.message).join('; '),
+        });
+        continue;
+      }
+
+      this.models.set(safeEntry.model_id, cloneEntry(safeEntry));
+      restored += 1;
+    }
+
+    return { restored, rejected };
+  }
+
+  /**
    * Owner-exclusive (L4) registry mutation gated through PolicyEvaluator + AuditLogger.
    * Agents or model output can never register, enable, or alter models.
    */

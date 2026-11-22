@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Activity, CheckCircle2, Cpu, Plus, Server, ShieldAlert, Trash2 } from 'lucide-react';
-import { controlPlaneApi } from '../api/client.ts';
+import { ApiError, controlPlaneApi } from '../api/client.ts';
 import type {
   ComputeNodeItem,
   ManagedWorkerItem,
@@ -54,6 +54,9 @@ export function ModelsRuntimesView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [pendingWorkerApprovals, setPendingWorkerApprovals] = useState<
+    Record<string, string>
+  >({});
 
   // Add model drawer
   const [showAddModel, setShowAddModel] = useState(false);
@@ -223,6 +226,13 @@ export function ModelsRuntimesView({
     }
   }
 
+  function describeWorkerActionError(err: unknown, fallback: string): string {
+    if (err instanceof ApiError && err.code === 'APPROVAL_REQUIRED') {
+      return `${err.message}${err.approvalId ? ` Approval ID: ${err.approvalId}.` : ''} Approve it in the Owner Approval Inbox, then repeat this action.`;
+    }
+    return err instanceof Error ? err.message : fallback;
+  }
+
   async function handleCreateWorker(e: FormEvent) {
     e.preventDefault();
     setBusyId('create-worker');
@@ -238,16 +248,25 @@ export function ModelsRuntimesView({
         requires_auth: workerRequiresAuth,
         auth_token_env_var: workerRequiresAuth ? workerTokenEnvVar.trim() : null,
         enabled: true,
+        approval_id: pendingWorkerApprovals.create,
       });
       setActionNotice(
         `Registered worker "${res.worker.name}" (${res.worker.runtime_type}). Run Probe Worker to check live health.`,
       );
+      setPendingWorkerApprovals((prev) => {
+        const next = { ...prev };
+        delete next.create;
+        return next;
+      });
       setWorkerId('');
       setWorkerName('');
       setShowAddWorker(false);
       await refreshParent();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to register worker.');
+      if (err instanceof ApiError && err.code === 'APPROVAL_REQUIRED' && err.approvalId) {
+        setPendingWorkerApprovals((prev) => ({ ...prev, create: err.approvalId! }));
+      }
+      setActionError(describeWorkerActionError(err, 'Failed to register worker.'));
     } finally {
       setBusyId(null);
     }
@@ -276,11 +295,24 @@ export function ModelsRuntimesView({
     setBusyId(`toggle-worker:${worker.worker_id}`);
     setActionError(null);
     setActionNotice(null);
+    const approvalKey = `toggle:${worker.worker_id}`;
     try {
-      await controlPlaneApi.toggleWorker(worker.worker_id, !worker.enabled);
+      await controlPlaneApi.toggleWorker(
+        worker.worker_id,
+        !worker.enabled,
+        pendingWorkerApprovals[approvalKey],
+      );
+      setPendingWorkerApprovals((prev) => {
+        const next = { ...prev };
+        delete next[approvalKey];
+        return next;
+      });
       await refreshParent();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to toggle worker.');
+      if (err instanceof ApiError && err.code === 'APPROVAL_REQUIRED' && err.approvalId) {
+        setPendingWorkerApprovals((prev) => ({ ...prev, [approvalKey]: err.approvalId! }));
+      }
+      setActionError(describeWorkerActionError(err, 'Failed to toggle worker.'));
     } finally {
       setBusyId(null);
     }
@@ -290,12 +322,21 @@ export function ModelsRuntimesView({
     setBusyId(`delete-worker:${id}`);
     setActionError(null);
     setActionNotice(null);
+    const approvalKey = `delete:${id}`;
     try {
-      await controlPlaneApi.deleteWorker(id);
+      await controlPlaneApi.deleteWorker(id, pendingWorkerApprovals[approvalKey]);
+      setPendingWorkerApprovals((prev) => {
+        const next = { ...prev };
+        delete next[approvalKey];
+        return next;
+      });
       setActionNotice(`Removed worker "${id}".`);
       await refreshParent();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to delete worker.');
+      if (err instanceof ApiError && err.code === 'APPROVAL_REQUIRED' && err.approvalId) {
+        setPendingWorkerApprovals((prev) => ({ ...prev, [approvalKey]: err.approvalId! }));
+      }
+      setActionError(describeWorkerActionError(err, 'Failed to delete worker.'));
     } finally {
       setBusyId(null);
     }
