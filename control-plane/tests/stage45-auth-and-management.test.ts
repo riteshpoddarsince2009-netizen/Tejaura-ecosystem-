@@ -551,7 +551,7 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
 
       const mVerifyMissing = await reqJson(
         `${h1.baseUrl}/api/models/qwen2.5-7b-modelscope/verify-install`,
-        { method: 'POST', cookie, body: {} },
+        { method: 'POST', cookie, body: JSON.stringify({}) },
       );
       assert.equal(mVerifyMissing.status, 200);
       assert.equal(
@@ -569,7 +569,7 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
       fs.writeFileSync(path.join(weightsDir, 'model.safetensors'), 'weights-header');
       const mVerifyFound = await reqJson(
         `${h1.baseUrl}/api/models/qwen2.5-7b-modelscope/verify-install`,
-        { method: 'POST', cookie, body: {} },
+        { method: 'POST', cookie, body: JSON.stringify({}) },
       );
       assert.equal(mVerifyFound.status, 200);
       assert.equal(
@@ -612,11 +612,14 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
           enabled: true,
         }),
       });
+      if (wOnlineCreate.status !== 201) {
+        console.log('wOnlineCreate error response:', wOnlineCreate.data);
+      }
       assert.equal(wOnlineCreate.status, 201);
 
       const wProbeOnline = await reqJson(
         `${h1.baseUrl}/api/workers/airllm_local_mock/probe`,
-        { method: 'POST', cookie, body: {} },
+        { method: 'POST', cookie, body: JSON.stringify({}) },
       );
       assert.equal(wProbeOnline.status, 200);
       assert.equal((wProbeOnline.data.worker as { health_status: string }).health_status, 'online');
@@ -641,7 +644,7 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
       assert.equal(wOfflineCreate.status, 201);
       const wProbeOffline = await reqJson(
         `${h1.baseUrl}/api/workers/airllm_offline_box/probe`,
-        { method: 'POST', cookie, body: {} },
+        { method: 'POST', cookie, body: JSON.stringify({}) },
       );
       assert.equal(wProbeOffline.status, 200);
       assert.equal((wProbeOffline.data.worker as { health_status: string }).health_status, 'offline');
