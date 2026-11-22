@@ -8,6 +8,13 @@ import { validateApproval, validateTask } from '../../contracts/validation/index
 import { toContractApproval, type ApprovalRecord } from '../../core/approvals/index.ts';
 import { applyStage3Migrations, type AppliedMigrationRecord } from './migrations.ts';
 import type {
+  AgentExecutionError,
+  AgentExecutionJobRecord,
+  AgentExecutionJobStatus,
+  AgentExecutionLogOutcome,
+  AgentExecutionLogRecord,
+  AgentExecutionRecoveryReport,
+  AgentPermissionDecision,
   CreateTaskPersistenceInput,
   ExecutionAttemptRecord,
   ExecutionAttemptStatus,
@@ -15,6 +22,9 @@ import type {
   LeasedTaskAttempt,
   OrchestratedTaskRecord,
   OrchestrationStore,
+  SandboxBrowserMode,
+  SandboxIsolationLevel,
+  SandboxNetworkMode,
   ScheduleRecord,
   ScheduleTaskTemplate,
   TaskEventRecord,
@@ -140,6 +150,59 @@ interface RawApprovalRow {
   consumed_at: string | null;
   consumed_for_task_id: string | null;
   schema_version: string;
+}
+
+interface RawAgentJobRow {
+  job_id: string;
+  task_id: string;
+  attempt_id: string | null;
+  agent_id: string;
+  agent_department: string;
+  agent_role: string;
+  sandbox_provider: string;
+  isolation_level: SandboxIsolationLevel;
+  status: AgentExecutionJobStatus;
+  requested_action: string;
+  resource_id: string;
+  environment: OrchestratedTaskRecord['environment'];
+  permission_decision: AgentPermissionDecision;
+  policy_reason_code: string;
+  approval_id: string | null;
+  tool_ids_json: string;
+  declared_scopes_json: string;
+  allowed_paths_json: string;
+  network_mode: SandboxNetworkMode;
+  network_allowlist_json: string;
+  browser_mode: SandboxBrowserMode;
+  input_json: string;
+  idempotency_key: string | null;
+  idempotent_action: number;
+  retry_count: number;
+  max_retries: number;
+  timeout_ms: number;
+  next_run_at: string;
+  result_json: string | null;
+  error_json: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+}
+
+interface RawAgentExecutionLogRow {
+  log_id: string;
+  job_id: string | null;
+  task_id: string;
+  agent_id: string;
+  requested_action: string;
+  permission_decision: AgentPermissionDecision;
+  policy_reason_code: string;
+  approval_id: string | null;
+  outcome: AgentExecutionLogOutcome;
+  summary: string;
+  details_json: string;
+  secrets_redacted: number;
+  created_at: string;
 }
 
 function assertSafeDbFilePath(dbPath: string): string {
@@ -285,6 +348,69 @@ function hydrateApprovalRow(row: RawApprovalRow): ApprovalRecord {
     );
   }
   return record;
+}
+
+function hydrateAgentJobRow(row: RawAgentJobRow): AgentExecutionJobRecord {
+  return {
+    job_id: row.job_id,
+    task_id: row.task_id,
+    attempt_id: row.attempt_id,
+    agent_id: row.agent_id,
+    agent_department: row.agent_department,
+    agent_role: row.agent_role,
+    sandbox_provider: row.sandbox_provider,
+    isolation_level: row.isolation_level,
+    status: row.status,
+    requested_action: row.requested_action,
+    resource_id: row.resource_id,
+    environment: row.environment,
+    permission_decision: row.permission_decision,
+    policy_reason_code: row.policy_reason_code,
+    approval_id: row.approval_id,
+    tool_ids: JSON.parse(row.tool_ids_json) as string[],
+    declared_scopes: JSON.parse(row.declared_scopes_json) as string[],
+    allowed_paths: JSON.parse(row.allowed_paths_json) as string[],
+    network_mode: row.network_mode,
+    network_allowlist: JSON.parse(row.network_allowlist_json) as string[],
+    browser_mode: row.browser_mode,
+    input: JSON.parse(row.input_json) as Record<string, unknown>,
+    idempotency_key: row.idempotency_key,
+    idempotent_action: row.idempotent_action === 1,
+    retry_count: row.retry_count,
+    max_retries: row.max_retries,
+    timeout_ms: row.timeout_ms,
+    next_run_at: row.next_run_at,
+    result: row.result_json
+      ? (JSON.parse(row.result_json) as Record<string, unknown>)
+      : null,
+    error: row.error_json
+      ? (JSON.parse(row.error_json) as AgentExecutionError)
+      : null,
+    created_at: row.created_at,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function hydrateAgentExecutionLogRow(
+  row: RawAgentExecutionLogRow,
+): AgentExecutionLogRecord {
+  return {
+    log_id: row.log_id,
+    job_id: row.job_id,
+    task_id: row.task_id,
+    agent_id: row.agent_id,
+    requested_action: row.requested_action,
+    permission_decision: row.permission_decision,
+    policy_reason_code: row.policy_reason_code,
+    approval_id: row.approval_id,
+    outcome: row.outcome,
+    summary: row.summary,
+    details: JSON.parse(row.details_json) as Record<string, unknown>,
+    secrets_redacted: row.secrets_redacted === 1,
+    created_at: row.created_at,
+  };
 }
 
 /**
@@ -1140,5 +1266,474 @@ export class SqliteOrchestrationStore implements OrchestrationStore {
       .prepare('SELECT * FROM approvals ORDER BY requested_at DESC')
       .all() as unknown as RawApprovalRow[];
     return rows.map(hydrateApprovalRow);
+  }
+
+  // Stage 4 Agent Execution Jobs & Structured Logs
+  private insertAgentExecutionLogRow(log: AgentExecutionLogRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_execution_logs (
+          log_id, job_id, task_id, agent_id, requested_action,
+          permission_decision, policy_reason_code, approval_id,
+          outcome, summary, details_json, secrets_redacted, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        log.log_id,
+        log.job_id,
+        log.task_id,
+        log.agent_id,
+        log.requested_action,
+        log.permission_decision,
+        log.policy_reason_code,
+        log.approval_id,
+        log.outcome,
+        log.summary,
+        JSON.stringify(log.details),
+        log.secrets_redacted ? 1 : 0,
+        log.created_at,
+      );
+  }
+
+  createAgentExecutionJob(params: {
+    job: AgentExecutionJobRecord;
+    initialLog: AgentExecutionLogRecord;
+  }): {
+    created: boolean;
+    job: AgentExecutionJobRecord;
+  } {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (params.job.idempotency_key) {
+        const existingRow = this.db
+          .prepare('SELECT * FROM agent_execution_jobs WHERE idempotency_key = ?')
+          .get(params.job.idempotency_key) as unknown as RawAgentJobRow | undefined;
+        if (existingRow) {
+          this.db.exec('COMMIT');
+          return { created: false, job: hydrateAgentJobRow(existingRow) };
+        }
+      }
+
+      this.db
+        .prepare(
+          `INSERT INTO agent_execution_jobs (
+            job_id, task_id, attempt_id, agent_id, agent_department, agent_role,
+            sandbox_provider, isolation_level, status, requested_action, resource_id,
+            environment, permission_decision, policy_reason_code, approval_id,
+            tool_ids_json, declared_scopes_json, allowed_paths_json, network_mode,
+            network_allowlist_json, browser_mode, input_json, idempotency_key,
+            idempotent_action, retry_count, max_retries, timeout_ms, next_run_at,
+            result_json, error_json, created_at, started_at, finished_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          params.job.job_id,
+          params.job.task_id,
+          params.job.attempt_id,
+          params.job.agent_id,
+          params.job.agent_department,
+          params.job.agent_role,
+          params.job.sandbox_provider,
+          params.job.isolation_level,
+          params.job.status,
+          params.job.requested_action,
+          params.job.resource_id,
+          params.job.environment,
+          params.job.permission_decision,
+          params.job.policy_reason_code,
+          params.job.approval_id,
+          JSON.stringify(params.job.tool_ids),
+          JSON.stringify(params.job.declared_scopes),
+          JSON.stringify(params.job.allowed_paths),
+          params.job.network_mode,
+          JSON.stringify(params.job.network_allowlist),
+          params.job.browser_mode,
+          JSON.stringify(params.job.input),
+          params.job.idempotency_key,
+          params.job.idempotent_action ? 1 : 0,
+          params.job.retry_count,
+          params.job.max_retries,
+          params.job.timeout_ms,
+          params.job.next_run_at,
+          params.job.result ? JSON.stringify(params.job.result) : null,
+          params.job.error ? JSON.stringify(params.job.error) : null,
+          params.job.created_at,
+          params.job.started_at,
+          params.job.finished_at,
+          params.job.updated_at,
+        );
+
+      this.insertAgentExecutionLogRow(params.initialLog);
+      this.db.exec('COMMIT');
+
+      const createdRow = this.db
+        .prepare('SELECT * FROM agent_execution_jobs WHERE job_id = ?')
+        .get(params.job.job_id) as unknown as RawAgentJobRow;
+      return { created: true, job: hydrateAgentJobRow(createdRow) };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  getAgentExecutionJob(jobId: string): AgentExecutionJobRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM agent_execution_jobs WHERE job_id = ?')
+      .get(jobId) as unknown as RawAgentJobRow | undefined;
+    return row ? hydrateAgentJobRow(row) : null;
+  }
+
+  getAgentExecutionJobByIdempotencyKey(
+    key: string,
+  ): AgentExecutionJobRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM agent_execution_jobs WHERE idempotency_key = ?')
+      .get(key) as unknown as RawAgentJobRow | undefined;
+    return row ? hydrateAgentJobRow(row) : null;
+  }
+
+  listAgentExecutionJobs(filter?: {
+    status?: AgentExecutionJobStatus;
+    taskId?: string;
+    agentId?: string;
+    limit?: number;
+  }): AgentExecutionJobRecord[] {
+    const limit = Math.min(Math.max(filter?.limit ?? 100, 1), 500);
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (filter?.status) {
+      clauses.push('status = ?');
+      params.push(filter.status);
+    }
+    if (filter?.taskId) {
+      clauses.push('task_id = ?');
+      params.push(filter.taskId);
+    }
+    if (filter?.agentId) {
+      clauses.push('agent_id = ?');
+      params.push(filter.agentId);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    params.push(limit);
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_execution_jobs ${where} ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...params) as unknown as RawAgentJobRow[];
+    return rows.map(hydrateAgentJobRow);
+  }
+
+  claimAgentExecutionJob(params: {
+    jobId?: string;
+    nowIso: string;
+  }): AgentExecutionJobRecord | null {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const candidate = params.jobId
+        ? (this.db
+            .prepare(
+              `SELECT * FROM agent_execution_jobs
+               WHERE job_id = ? AND status = 'queued'`,
+            )
+            .get(params.jobId) as unknown as RawAgentJobRow | undefined)
+        : (this.db
+            .prepare(
+              `SELECT * FROM agent_execution_jobs
+               WHERE status = 'queued' AND next_run_at <= ?
+               ORDER BY created_at ASC
+               LIMIT 1`,
+            )
+            .get(params.nowIso) as unknown as RawAgentJobRow | undefined);
+
+      if (!candidate) {
+        this.db.exec('COMMIT');
+        return null;
+      }
+
+      const info = this.db
+        .prepare(
+          `UPDATE agent_execution_jobs
+           SET status = 'running',
+               started_at = COALESCE(started_at, ?),
+               updated_at = ?
+           WHERE job_id = ? AND status = 'queued'`,
+        )
+        .run(params.nowIso, params.nowIso, candidate.job_id);
+
+      if (info.changes === 0) {
+        this.db.exec('COMMIT');
+        return null;
+      }
+
+      const updated = this.db
+        .prepare('SELECT * FROM agent_execution_jobs WHERE job_id = ?')
+        .get(candidate.job_id) as unknown as RawAgentJobRow;
+      this.db.exec('COMMIT');
+      return hydrateAgentJobRow(updated);
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  completeAgentExecutionJob(params: {
+    jobId: string;
+    status: 'completed' | 'failed' | 'queued' | 'cancelled';
+    nowIso: string;
+    result?: Record<string, unknown> | null;
+    error?: AgentExecutionError | null;
+    retryCount?: number;
+    nextRunAt?: string;
+    log: AgentExecutionLogRecord;
+  }): AgentExecutionJobRecord | null {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.getAgentExecutionJob(params.jobId);
+      if (!existing) {
+        this.db.exec('ROLLBACK');
+        return null;
+      }
+
+      // Preserve external cancellation if job was cancelled while running.
+      const effectiveStatus =
+        existing.status === 'cancelled' ? 'cancelled' : params.status;
+      const isTerminal =
+        effectiveStatus === 'completed' ||
+        effectiveStatus === 'failed' ||
+        effectiveStatus === 'cancelled';
+
+      if (existing.status !== 'cancelled') {
+        this.db
+          .prepare(
+            `UPDATE agent_execution_jobs
+             SET status = ?,
+                 result_json = ?,
+                 error_json = ?,
+                 retry_count = ?,
+                 next_run_at = ?,
+                 finished_at = ?,
+                 updated_at = ?
+             WHERE job_id = ?`,
+          )
+          .run(
+            effectiveStatus,
+            params.result !== undefined
+              ? params.result
+                ? JSON.stringify(params.result)
+                : null
+              : existing.result
+                ? JSON.stringify(existing.result)
+                : null,
+            params.error !== undefined
+              ? params.error
+                ? JSON.stringify(params.error)
+                : null
+              : existing.error
+                ? JSON.stringify(existing.error)
+                : null,
+            params.retryCount ?? existing.retry_count,
+            params.nextRunAt ?? existing.next_run_at,
+            isTerminal ? params.nowIso : null,
+            params.nowIso,
+            params.jobId,
+          );
+      }
+
+      this.insertAgentExecutionLogRow(params.log);
+      this.db.exec('COMMIT');
+      return this.getAgentExecutionJob(params.jobId);
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  cancelAgentExecutionJob(params: {
+    jobId: string;
+    nowIso: string;
+    error: AgentExecutionError;
+    log: AgentExecutionLogRecord;
+  }): AgentExecutionJobRecord | null {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.getAgentExecutionJob(params.jobId);
+      if (!existing) {
+        this.db.exec('ROLLBACK');
+        return null;
+      }
+      if (['completed', 'failed', 'cancelled'].includes(existing.status)) {
+        this.db.exec('ROLLBACK');
+        return existing;
+      }
+
+      this.db
+        .prepare(
+          `UPDATE agent_execution_jobs
+           SET status = 'cancelled',
+               error_json = ?,
+               finished_at = ?,
+               updated_at = ?
+           WHERE job_id = ?`,
+        )
+        .run(
+          JSON.stringify(params.error),
+          params.nowIso,
+          params.nowIso,
+          params.jobId,
+        );
+
+      this.insertAgentExecutionLogRow(params.log);
+      this.db.exec('COMMIT');
+      return this.getAgentExecutionJob(params.jobId);
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  recoverInterruptedAgentExecutionJobs(
+    nowIso: string,
+  ): AgentExecutionRecoveryReport {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const interrupted = this.db
+        .prepare(
+          `SELECT * FROM agent_execution_jobs WHERE status = 'running' ORDER BY created_at ASC`,
+        )
+        .all() as unknown as RawAgentJobRow[];
+
+      const requeued: string[] = [];
+      const failed: string[] = [];
+
+      for (const row of interrupted) {
+        const job = hydrateAgentJobRow(row);
+        if (job.idempotent_action && job.retry_count < job.max_retries) {
+          const nextRetry = job.retry_count + 1;
+          this.db
+            .prepare(
+              `UPDATE agent_execution_jobs
+               SET status = 'queued',
+                   retry_count = ?,
+                   next_run_at = ?,
+                   updated_at = ?
+               WHERE job_id = ?`,
+            )
+            .run(nextRetry, nowIso, nowIso, job.job_id);
+
+          this.insertAgentExecutionLogRow({
+            log_id: `elog_${crypto.randomUUID()}`,
+            job_id: job.job_id,
+            task_id: job.task_id,
+            agent_id: job.agent_id,
+            requested_action: job.requested_action,
+            permission_decision: job.permission_decision,
+            policy_reason_code: job.policy_reason_code,
+            approval_id: job.approval_id,
+            outcome: 'queued',
+            summary: `Recovered interrupted execution job after restart; re-queued as retry ${nextRetry}/${job.max_retries}.`,
+            details: {
+              recovery: true,
+              retry_count: nextRetry,
+              max_retries: job.max_retries,
+            },
+            secrets_redacted: false,
+            created_at: nowIso,
+          });
+          requeued.push(job.job_id);
+        } else {
+          const reason = !job.idempotent_action
+            ? 'Process interrupted during non-idempotent sandboxed job; automatic retry blocked.'
+            : `Process interrupted and retry limit (${job.max_retries}) exhausted.`;
+          const errObj: AgentExecutionError = {
+            code: !job.idempotent_action
+              ? 'INTERRUPTED_NON_IDEMPOTENT_JOB'
+              : 'INTERRUPTED_JOB_RETRY_EXHAUSTED',
+            message: reason,
+            retryable: false,
+          };
+          this.db
+            .prepare(
+              `UPDATE agent_execution_jobs
+               SET status = 'failed',
+                   error_json = ?,
+                   finished_at = ?,
+                   updated_at = ?
+               WHERE job_id = ?`,
+            )
+            .run(JSON.stringify(errObj), nowIso, nowIso, job.job_id);
+
+          this.insertAgentExecutionLogRow({
+            log_id: `elog_${crypto.randomUUID()}`,
+            job_id: job.job_id,
+            task_id: job.task_id,
+            agent_id: job.agent_id,
+            requested_action: job.requested_action,
+            permission_decision: job.permission_decision,
+            policy_reason_code: job.policy_reason_code,
+            approval_id: job.approval_id,
+            outcome: 'failed',
+            summary: reason,
+            details: {
+              recovery: true,
+              error_code: errObj.code,
+            },
+            secrets_redacted: false,
+            created_at: nowIso,
+          });
+          failed.push(job.job_id);
+        }
+      }
+
+      this.db.exec('COMMIT');
+      return {
+        recovered_count: interrupted.length,
+        requeued_job_ids: requeued,
+        failed_job_ids: failed,
+      };
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  appendAgentExecutionLog(log: AgentExecutionLogRecord): void {
+    this.insertAgentExecutionLogRow(log);
+  }
+
+  listAgentExecutionLogs(filter?: {
+    jobId?: string;
+    taskId?: string;
+    agentId?: string;
+    limit?: number;
+  }): AgentExecutionLogRecord[] {
+    const limit = Math.min(Math.max(filter?.limit ?? 100, 1), 500);
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (filter?.jobId) {
+      clauses.push('job_id = ?');
+      params.push(filter.jobId);
+    }
+    if (filter?.taskId) {
+      clauses.push('task_id = ?');
+      params.push(filter.taskId);
+    }
+    if (filter?.agentId) {
+      clauses.push('agent_id = ?');
+      params.push(filter.agentId);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    params.push(limit);
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_execution_logs ${where} ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...params) as unknown as RawAgentExecutionLogRow[];
+    return rows.map(hydrateAgentExecutionLogRow);
   }
 }

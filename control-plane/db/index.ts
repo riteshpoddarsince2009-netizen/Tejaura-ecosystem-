@@ -13,6 +13,13 @@ export {
 } from './sqlite-store.ts';
 
 export type {
+  AgentExecutionError,
+  AgentExecutionJobRecord,
+  AgentExecutionJobStatus,
+  AgentExecutionLogOutcome,
+  AgentExecutionLogRecord,
+  AgentExecutionRecoveryReport,
+  AgentPermissionDecision,
   CreateTaskPersistenceInput,
   ExecutionAttemptRecord,
   ExecutionAttemptStatus,
@@ -20,6 +27,9 @@ export type {
   LeasedTaskAttempt,
   OrchestratedTaskRecord,
   OrchestrationStore,
+  SandboxBrowserMode,
+  SandboxIsolationLevel,
+  SandboxNetworkMode,
   ScheduleRecord,
   ScheduleTaskTemplate,
   TaskEventRecord,

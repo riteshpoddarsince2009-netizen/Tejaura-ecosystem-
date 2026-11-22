@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Stage 3 — Core Control Plane, Persistent SQLite Orchestration & Phone-First Owner Control Plane UI Implemented (Pre-Alpha)  
-> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/security/`, `core/auth/`, `core/rbac/`, `core/secrets/`), and Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`). Sandboxed `L2` execution plugins (`Stage 4`) and autonomous agent loops (`Stage 5`) remain **not yet implemented**. Not production-hardened or physically GPU-verified yet.
+> **Status:** Stage 4 Foundation — Governance, AirLLM Local Inference, Private Auth, Persistent Control Plane & Sandboxed Agent Execution Engine Implemented (Pre-Alpha)  
+> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/`), Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`), and Stage 4 Sandboxed Agent Execution Foundation (`execution/`, SQLite v2 execution jobs & logs, `MockSandboxAdapter`). OS-level `isolated_container` sandboxing, concrete department agents, physical GPU verification, and Stage 5 integrations remain **pending**.
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -44,8 +44,12 @@ To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilit
   - **Authenticated HTTP API (`control-plane/server/`, `server.ts`):** Cookie sessions, CSRF (`X-TEJAURA-CSRF: 1` + Origin/Referer checks), sliding-window API rate limits, `64KB` JSON payload caps, production HTTPS enforcement, and read-only secret presence metadata (never secret values).
   - **Mobile-First Owner Control Plane UI (`src/`):** Initial setup & one-time recovery codes, login (+ MFA) & recovery, Overview Dashboard, Task Center (create/inspect/cancel/confirm-retry), Approval Inbox (required reason + 2-step confirmation), Schedules, Model & Runtime Center (live availability probe), Read-Only System & Policy Inspector, Read-Only Audit Center, and Settings & Security.
 
+- **Stage 4 Sandboxed Agent Execution Foundation (`execution/`, `control-plane/db/`, `control-plane/server/`):**
+  - **Execution Engine & Persistence:** Converts approved agent tasks into persistent SQLite execution jobs (`queued`, `running`, `completed`, `failed`, `cancelled`) and structured secret-redacted logs (`002_stage4_agent_execution`), with timeouts, owner-only cancellation, bounded retries, idempotency keys, and restart recovery.
+  - **Default-Deny Sandbox Policy & Mock Adapter:** `Agent`/`Tool` contract validation, workspace path allowlists, shell blocking, unrestricted network/browser denial, `ApprovalService` gating, and `MockSandboxAdapter` (`supportsOsIsolation: false` — dev/test simulation only).
+
 ### Planned / Not Yet Hardware- or Deployment-Verified
-- **Stage 4:** Sandboxed `L2` local workspace task runners, modular capability plugins, and dry-run mutation diffs.
+- **Remaining Stage 4:** OS-level `isolated_container` `SandboxAdapter`, concrete department agents (`research`, `engineering`, `seo`, `design`, `content`, `analytics`, `customer_support`), dry-run diffs, and execution job UI tabs.
 - **Stage 5:** Supervised `L3` external integrations, end-to-end penetration/security audit, and physical GPU/Android device deployment verification.
 
 ---
@@ -90,5 +94,6 @@ To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilit
 - [Stage 2B Threat Model](docs/THREAT_MODEL.md)
 - [Local Model Infrastructure](docs/LOCAL_MODELS.md)
 - [Stage 3 Control Plane Guide](docs/CONTROL_PLANE_STAGE3.md)
+- [Stage 4 Agent Execution Foundation](docs/STAGE4_AGENT_EXECUTION.md)
 - [System Architecture](docs/ARCHITECTURE.md)
 - [Development Roadmap](docs/ROADMAP.md)

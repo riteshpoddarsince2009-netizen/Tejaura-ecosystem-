@@ -1,7 +1,7 @@
 # TEJAURA Modular System Architecture
 
-**Document Version:** 1.4.0  
-**Implementation Status:** Stage 3 — Governance, Contracts, Policy Engine, AirLLM-Primary Local Model Infrastructure, Private Identity/Auth/RBAC/Secrets, Persistent SQLite Orchestrator, Control Plane HTTP API, and Phone-First Owner Control Plane UI Implemented (Pre-Alpha). Sandboxed `L2` task plugins (`Stage 4`) and autonomous agent loops (`Stage 5`) remain **planned**.
+**Document Version:** 1.5.0  
+**Implementation Status:** Stage 4 Foundation — Governance, Contracts, Policy Engine, AirLLM-Primary Local Model Infrastructure, Private Identity/Auth/RBAC/Secrets, Persistent SQLite Orchestrator, Control Plane HTTP API, Phone-First Owner Control Plane UI, and **Stage 4 Sandboxed Agent Execution Foundation (`execution/`, SQLite v2 jobs/logs, `MockSandboxAdapter`)** Implemented (Pre-Alpha). OS-level `isolated_container` runtime, concrete department agents (`Stage 4` completion), and autonomous agent loops (`Stage 5`) remain **planned**.
 
 ---
 
@@ -77,8 +77,11 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 - **`control-plane/server/` & `server.ts`:** Express control-plane HTTP API integrated with Stage 2B auth/RBAC/secrets/audit, CSRF protection, sliding-window rate limiting, and Vite dev / static production hosting on port `3000`.
 - **`src/`:** Mobile-first React + Tailwind control plane UI covering all owner authentication, task, approval, scheduling, model probing, policy inspection, audit trail, and security management views.
 
-### 3.4 Sandboxed Execution Plugins *(Planned — Stage 4+)*
-- Sandboxed `L2` task plugins with workspace path allowlists and dry-run diffs remain **not yet implemented**.
+### 3.4 `execution/` — Stage 4 Sandboxed Agent Execution Foundation *(Implemented — Mock-Verified)*
+- **`execution/agent-execution-engine.ts`:** Persists execution jobs (`queued -> running -> completed | failed | cancelled`) and structured redacted logs into SQLite (`agent_execution_jobs`, `agent_execution_logs` via migration `002_stage4_agent_execution`), enforces `ApprovalService` single-use approvals, `AbortSignal` timeouts/cancellation, bounded retries, idempotency deduplication, and startup crash recovery.
+- **`execution/sandbox-policy.ts` & `execution/secret-redactor.ts`:** Default-deny validation for `Agent`/`Tool` contracts, workspace path allowlists/containment, shell blocking, unrestricted network/browser blocking, anti-privilege-escalation/self-approval checks, and secret scrubbing.
+- **`execution/mock-sandbox-adapter.ts`:** Development/test `MockSandboxAdapter` (`supportsOsIsolation: false`, explicit non-isolation disclaimer) behind the swappable `SandboxAdapter` interface.
+- **Remaining Stage 4 Work:** OS-level `isolated_container` `SandboxAdapter`, concrete department agent workflows, and dedicated execution UI views.
 
 ---
 

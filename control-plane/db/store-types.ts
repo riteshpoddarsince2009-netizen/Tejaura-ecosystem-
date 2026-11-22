@@ -110,6 +110,92 @@ export interface CreateTaskPersistenceInput {
   initialEvent: TaskEventRecord;
 }
 
+export type AgentExecutionJobStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type SandboxIsolationLevel = 'mock_in_process' | 'isolated_container';
+export type SandboxNetworkMode = 'none' | 'allowlisted_endpoints';
+export type SandboxBrowserMode = 'disabled' | 'read_only_allowlisted';
+export type AgentPermissionDecision = 'allow' | 'deny' | 'require_approval';
+
+export interface AgentExecutionError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface AgentExecutionJobRecord {
+  job_id: string;
+  task_id: string;
+  attempt_id: string | null;
+  agent_id: string;
+  agent_department: string;
+  agent_role: string;
+  sandbox_provider: string;
+  isolation_level: SandboxIsolationLevel;
+  status: AgentExecutionJobStatus;
+  requested_action: string;
+  resource_id: string;
+  environment: ExecutionEnvironment;
+  permission_decision: AgentPermissionDecision;
+  policy_reason_code: string;
+  approval_id: string | null;
+  tool_ids: string[];
+  declared_scopes: string[];
+  allowed_paths: string[];
+  network_mode: SandboxNetworkMode;
+  network_allowlist: string[];
+  browser_mode: SandboxBrowserMode;
+  input: Record<string, unknown>;
+  idempotency_key: string | null;
+  idempotent_action: boolean;
+  retry_count: number;
+  max_retries: number;
+  timeout_ms: number;
+  next_run_at: string;
+  result: Record<string, unknown> | null;
+  error: AgentExecutionError | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+}
+
+export type AgentExecutionLogOutcome =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'denied'
+  | 'approval_required';
+
+export interface AgentExecutionLogRecord {
+  log_id: string;
+  job_id: string | null;
+  task_id: string;
+  agent_id: string;
+  requested_action: string;
+  permission_decision: AgentPermissionDecision;
+  policy_reason_code: string;
+  approval_id: string | null;
+  outcome: AgentExecutionLogOutcome;
+  summary: string;
+  details: Record<string, unknown>;
+  secrets_redacted: boolean;
+  created_at: string;
+}
+
+export interface AgentExecutionRecoveryReport {
+  recovered_count: number;
+  requeued_job_ids: string[];
+  failed_job_ids: string[];
+}
+
 export interface OrchestrationStore extends ApprovalStore {
   getAppliedMigrations(): AppliedMigrationRecord[];
   close(): void;
@@ -184,6 +270,55 @@ export interface OrchestrationStore extends ApprovalStore {
     lastRunAt?: string | null;
     updatedAt: string;
   }): ScheduleRecord | null;
+
+  // Stage 4 Agent Execution Jobs & Logs
+  createAgentExecutionJob(params: {
+    job: AgentExecutionJobRecord;
+    initialLog: AgentExecutionLogRecord;
+  }): {
+    created: boolean;
+    job: AgentExecutionJobRecord;
+  };
+  getAgentExecutionJob(jobId: string): AgentExecutionJobRecord | null;
+  getAgentExecutionJobByIdempotencyKey(
+    key: string,
+  ): AgentExecutionJobRecord | null;
+  listAgentExecutionJobs(filter?: {
+    status?: AgentExecutionJobStatus;
+    taskId?: string;
+    agentId?: string;
+    limit?: number;
+  }): AgentExecutionJobRecord[];
+  claimAgentExecutionJob(params: {
+    jobId?: string;
+    nowIso: string;
+  }): AgentExecutionJobRecord | null;
+  completeAgentExecutionJob(params: {
+    jobId: string;
+    status: 'completed' | 'failed' | 'queued' | 'cancelled';
+    nowIso: string;
+    result?: Record<string, unknown> | null;
+    error?: AgentExecutionError | null;
+    retryCount?: number;
+    nextRunAt?: string;
+    log: AgentExecutionLogRecord;
+  }): AgentExecutionJobRecord | null;
+  cancelAgentExecutionJob(params: {
+    jobId: string;
+    nowIso: string;
+    error: AgentExecutionError;
+    log: AgentExecutionLogRecord;
+  }): AgentExecutionJobRecord | null;
+  recoverInterruptedAgentExecutionJobs(
+    nowIso: string,
+  ): AgentExecutionRecoveryReport;
+  appendAgentExecutionLog(log: AgentExecutionLogRecord): void;
+  listAgentExecutionLogs(filter?: {
+    jobId?: string;
+    taskId?: string;
+    agentId?: string;
+    limit?: number;
+  }): AgentExecutionLogRecord[];
 
   // Approvals (ApprovalStore)
   get(approvalId: string): ApprovalRecord | null;

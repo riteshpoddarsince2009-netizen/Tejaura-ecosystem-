@@ -67,6 +67,10 @@ import {
   type ScheduleTaskTemplate,
 } from '../db/index.ts';
 import {
+  AgentExecutionEngine,
+  MockSandboxAdapter,
+} from '../../execution/index.ts';
+import {
   TaskOrchestrator,
   type ExternalTaskActionHandler,
 } from '../orchestrator/index.ts';
@@ -106,6 +110,7 @@ export interface ControlPlaneAppBundle {
   lifecycle: ModelLifecycleManager;
   router: ModelRouter;
   orchestrator: TaskOrchestrator;
+  executionEngine: AgentExecutionEngine;
   close: () => void;
 }
 
@@ -351,6 +356,23 @@ export function createControlPlaneApp(
     externalHandlers: options.externalHandlers,
     clock,
   });
+
+  const executionEngine = new AgentExecutionEngine({
+    store,
+    approvals: orchestrator.getApprovalService(),
+    auditLogger,
+    systemConfig,
+    policyConfig: {
+      workspaceRoot: process.cwd(),
+      allowedRelativePaths: ['sandbox'],
+      defaultNetworkMode: 'none',
+      defaultBrowserMode: 'disabled',
+    },
+    adapters: [new MockSandboxAdapter({ router, systemConfig })],
+    defaultSandboxProvider: 'mock_sandbox_v1',
+    clock,
+  });
+  executionEngine.recoverOnStartup();
 
   const app = express();
   app.disable('x-powered-by');
@@ -650,6 +672,7 @@ export function createControlPlaneApp(
     }
 
     orchestrator.bindDesignatedOwnerId(result.owner_id);
+    executionEngine.bindApprovalService(orchestrator.getApprovalService());
 
     res.status(201).json({
       ok: true,
@@ -1465,6 +1488,165 @@ export function createControlPlaneApp(
     },
   );
 
+  // -------------------- Stage 4 Sandboxed Agent Execution Routes --------------------
+
+  app.get(
+    '/api/execution/adapters',
+    requireOwnerAuth('governance:read'),
+    (_req: Request, res: Response) => {
+      res.json({
+        ok: true,
+        adapters: executionEngine.listAdapters(),
+      });
+    },
+  );
+
+  app.get(
+    '/api/execution/jobs',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const statusParam =
+        typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+      const taskId =
+        typeof req.query.task_id === 'string' ? req.query.task_id.trim() : undefined;
+      const agentId =
+        typeof req.query.agent_id === 'string' ? req.query.agent_id.trim() : undefined;
+      const rawLimit =
+        typeof req.query.limit === 'string' ? Number(req.query.limit) : 100;
+      const limit = Number.isFinite(rawLimit)
+        ? Math.min(250, Math.max(1, Math.round(rawLimit)))
+        : 100;
+
+      const validStatuses = new Set([
+        'queued',
+        'running',
+        'completed',
+        'failed',
+        'cancelled',
+      ]);
+      if (statusParam && !validStatuses.has(statusParam)) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_JOB_STATUS',
+          error: `Unsupported execution job status "${statusParam}".`,
+        });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        jobs: executionEngine.listJobs({
+          status: statusParam as Parameters<
+            AgentExecutionEngine['listJobs']
+          >[0] extends infer F
+            ? F extends { status?: infer S }
+              ? S
+              : never
+            : never,
+          taskId,
+          agentId,
+          limit,
+        }),
+      });
+    },
+  );
+
+  app.get(
+    '/api/execution/jobs/:id',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const jobId = sanitizeString(req.params.id, 3, 128);
+      if (!jobId) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_JOB_ID',
+          error: 'Invalid execution job ID.',
+        });
+        return;
+      }
+      const job = executionEngine.getJob(jobId);
+      if (!job) {
+        res.status(404).json({
+          ok: false,
+          code: 'JOB_NOT_FOUND',
+          error: `Execution job "${jobId}" was not found.`,
+        });
+        return;
+      }
+      res.json({
+        ok: true,
+        job,
+        logs: executionEngine.listExecutionLogs({ jobId }),
+      });
+    },
+  );
+
+  app.post(
+    '/api/execution/jobs/:id/cancel',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const jobId = sanitizeString(req.params.id, 3, 128);
+      if (!jobId) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_JOB_ID',
+          error: 'Invalid execution job ID.',
+        });
+        return;
+      }
+      const reason =
+        isPlainObject(req.body) && typeof req.body.reason === 'string'
+          ? req.body.reason.trim().slice(0, 300)
+          : 'Cancelled by owner from control plane.';
+
+      const result = executionEngine.cancelJob({
+        jobId,
+        actor: req.tejauraSession!.toPolicyActor(),
+        reason,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_exec_job_cancel',
+      });
+      if (!result.ok) {
+        const status =
+          result.code === 'JOB_NOT_FOUND'
+            ? 404
+            : result.code === 'JOB_ALREADY_TERMINAL'
+              ? 409
+              : 403;
+        res.status(status).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.get(
+    '/api/execution/logs',
+    requireOwnerAuth('audit:read'),
+    (req: Request, res: Response) => {
+      const jobId =
+        typeof req.query.job_id === 'string' ? req.query.job_id.trim() : undefined;
+      const taskId =
+        typeof req.query.task_id === 'string' ? req.query.task_id.trim() : undefined;
+      const agentId =
+        typeof req.query.agent_id === 'string' ? req.query.agent_id.trim() : undefined;
+      const rawLimit =
+        typeof req.query.limit === 'string' ? Number(req.query.limit) : 100;
+      const limit = Number.isFinite(rawLimit)
+        ? Math.min(250, Math.max(1, Math.round(rawLimit)))
+        : 100;
+
+      res.json({
+        ok: true,
+        logs: executionEngine.listExecutionLogs({
+          jobId,
+          taskId,
+          agentId,
+          limit,
+        }),
+      });
+    },
+  );
+
   // Any unmatched /api route fails closed with JSON 404.
   app.use('/api', (_req: Request, res: Response) => {
     res.status(404).json({
@@ -1486,6 +1668,7 @@ export function createControlPlaneApp(
     lifecycle,
     router,
     orchestrator,
+    executionEngine,
     close: () => {
       orchestrator.stopWorkerLoop();
       store.close();

@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test contracts/tests/*.test.ts core/tests/*.test.ts intelligence/tests/*.test.ts control-plane/tests/*.test.ts"
+    "test": "tsx --test contracts/tests/*.test.ts core/tests/*.test.ts intelligence/tests/*.test.ts control-plane/tests/*.test.ts execution/tests/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -154,6 +154,93 @@ export const STAGE3_MIGRATIONS: readonly SchemaMigration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: '002_stage4_agent_execution',
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_execution_jobs (
+        job_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        attempt_id TEXT,
+        agent_id TEXT NOT NULL,
+        agent_department TEXT NOT NULL,
+        agent_role TEXT NOT NULL,
+        sandbox_provider TEXT NOT NULL,
+        isolation_level TEXT NOT NULL CHECK (
+          isolation_level IN ('mock_in_process', 'isolated_container')
+        ),
+        status TEXT NOT NULL CHECK (
+          status IN ('queued', 'running', 'completed', 'failed', 'cancelled')
+        ),
+        requested_action TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        environment TEXT NOT NULL CHECK (
+          environment IN ('sandbox', 'local', 'staging', 'production')
+        ),
+        permission_decision TEXT NOT NULL CHECK (
+          permission_decision IN ('allow', 'deny', 'require_approval')
+        ),
+        policy_reason_code TEXT NOT NULL,
+        approval_id TEXT,
+        tool_ids_json TEXT NOT NULL,
+        declared_scopes_json TEXT NOT NULL,
+        allowed_paths_json TEXT NOT NULL,
+        network_mode TEXT NOT NULL CHECK (
+          network_mode IN ('none', 'allowlisted_endpoints')
+        ),
+        network_allowlist_json TEXT NOT NULL,
+        browser_mode TEXT NOT NULL CHECK (
+          browser_mode IN ('disabled', 'read_only_allowlisted')
+        ),
+        input_json TEXT NOT NULL,
+        idempotency_key TEXT UNIQUE,
+        idempotent_action INTEGER NOT NULL DEFAULT 1 CHECK (idempotent_action IN (0, 1)),
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+        max_retries INTEGER NOT NULL DEFAULT 0 CHECK (max_retries >= 0),
+        timeout_ms INTEGER NOT NULL DEFAULT 30000 CHECK (timeout_ms >= 100),
+        next_run_at TEXT NOT NULL,
+        result_json TEXT,
+        error_json TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_jobs_queue
+        ON agent_execution_jobs (status, next_run_at, created_at ASC);
+
+      CREATE INDEX IF NOT EXISTS idx_agent_jobs_task
+        ON agent_execution_jobs (task_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS agent_execution_logs (
+        log_id TEXT PRIMARY KEY,
+        job_id TEXT,
+        task_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        requested_action TEXT NOT NULL,
+        permission_decision TEXT NOT NULL CHECK (
+          permission_decision IN ('allow', 'deny', 'require_approval')
+        ),
+        policy_reason_code TEXT NOT NULL,
+        approval_id TEXT,
+        outcome TEXT NOT NULL CHECK (
+          outcome IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'denied', 'approval_required')
+        ),
+        summary TEXT NOT NULL,
+        details_json TEXT NOT NULL,
+        secrets_redacted INTEGER NOT NULL DEFAULT 0 CHECK (secrets_redacted IN (0, 1)),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (job_id) REFERENCES agent_execution_jobs(job_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_exec_logs_job
+        ON agent_execution_logs (job_id, created_at ASC);
+
+      CREATE INDEX IF NOT EXISTS idx_agent_exec_logs_task
+        ON agent_execution_logs (task_id, created_at ASC);
+    `,
+  },
 ];
 
 export interface AppliedMigrationRecord {

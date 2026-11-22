@@ -1,6 +1,6 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 3 — Core Control Plane, Persistent SQLite Orchestration & Phone-First Owner Control Plane UI Complete *(Automated-Test Verified; Physical GPU Inference, Mobile Device QA & Production Deployment Pending)*  
+**Current Position:** Stage 4 Foundation — Sandboxed Agent Execution Engine, Policy/Approval Gates, Secret Redaction & SQLite Job Persistence Complete *(Mock-Verified; OS-Level Container Isolation & Concrete Department Agents Remaining)*  
 **Guiding Constraints:** Human-governed, open-source-first, local-model-first (AirLLM primary), model-provider agnostic, phone-first control plane, free-first, modular, and testable.
 
 ---
@@ -78,12 +78,17 @@
 
 ---
 
-## Stage 4 — Sandboxed Local Execution & Modular Skills *(Planned)*
-**Status:** Planned (Not Started)
+## Stage 4 — Sandboxed Agent Execution Foundation & Modular Agents *(Foundation Complete — Container Isolation & Concrete Agents Pending)*
+**Status:** Execution Infrastructure Implemented & Automated-Test Verified (`MockSandboxAdapter` — No OS-Level Container Isolation Yet)
 
-- [ ] Implement bounded `L2` local task runner with strict path allowlists and execution timeouts
-- [ ] Support modular capability plugins with manifest-declared permission scopes
-- [ ] Implement pre-execution dry-run diffs for all file/workspace mutations
+- [x] Implement `AgentExecutionEngine` (`execution/agent-execution-engine.ts`) converting approved tasks into persistent SQLite jobs (`queued -> running -> completed | failed | cancelled`) with migration `002_stage4_agent_execution`
+- [x] Define swappable `SandboxAdapter` boundary (`execution/execution-types.ts`) and `MockSandboxAdapter` (`supportsOsIsolation: false`) with AirLLM-first `ModelRouter` integration and zero shell spawning
+- [x] Enforce default-deny sandbox policy (`execution/sandbox-policy.ts`): `Agent`/`Tool` contract checks, workspace path allowlists, shell blocking, unrestricted network/browser denial, and agent privilege/self-approval prevention
+- [x] Reuse `ApprovalService` single-use owner approval gating, `AbortSignal` timeouts/cancellation, bounded retry limits, idempotency deduplication, startup crash recovery, and thorough secret redaction (`execution/secret-redactor.ts`)
+- [x] Expose RBAC-protected `/api/execution/*` endpoints and pass Stage 4 automated execution test suite (`execution/tests/stage4-execution.test.ts`)
+- [ ] Implement `isolated_container` `SandboxAdapter` with OS-level filesystem, PID, CPU/memory, and network namespace isolation
+- [ ] Implement concrete department agent workflows (`research`, `engineering`, `seo`, `design`, `content`, `analytics`, `customer_support`) and dry-run workspace diffs
+- [ ] Add dedicated Stage 4 execution job & log views to the mobile-first Control Plane UI (`src/`)
 
 ---
 
