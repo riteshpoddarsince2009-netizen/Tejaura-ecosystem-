@@ -115,6 +115,8 @@ export interface StoredOwnerAccount {
   owner_id: string;
   username: string;
   email: string;
+  display_name?: string;
+  timezone?: string;
   password_hash: string;
   role: 'owner';
   created_at: string;

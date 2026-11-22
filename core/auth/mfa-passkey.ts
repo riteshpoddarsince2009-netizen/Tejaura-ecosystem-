@@ -145,7 +145,7 @@ export class TotpMfaModule implements MfaChallengeModule {
       };
     }
 
-    const cleanCode = (input.code ?? '').trim();
+    const cleanCode = (input.code ?? '').replace(/\s+/g, '');
     if (!/^\d{6}$/.test(cleanCode)) {
       return {
         valid: false,

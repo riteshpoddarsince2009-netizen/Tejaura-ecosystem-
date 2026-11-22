@@ -16,17 +16,35 @@ import type {
   AgentExecutionRecoveryReport,
   AgentPermissionDecision,
   CreateTaskPersistenceInput,
+  DatabaseHealthStats,
   ExecutionAttemptRecord,
   ExecutionAttemptStatus,
   LeaseRecoveryReport,
   LeasedTaskAttempt,
+  ManagedAgentDepartment,
+  ManagedAgentHealth,
+  ManagedAgentRecord,
+  ManagedAgentStatus,
+  ManagedModelRecord,
+  ManagedModelSource,
+  ManagedProjectDeploymentStatus,
+  ManagedProjectHealthStatus,
+  ManagedProjectRecord,
+  ManagedProjectType,
+  ManagedWorkerHealthStatus,
+  ManagedWorkerRecord,
+  ModelInstallStatus,
   OrchestratedTaskRecord,
   OrchestrationStore,
+  ProjectChangeEntry,
+  ProjectErrorEntry,
   SandboxBrowserMode,
   SandboxIsolationLevel,
   SandboxNetworkMode,
   ScheduleRecord,
   ScheduleTaskTemplate,
+  SystemBackupRecord,
+  SystemConfigEntry,
   TaskEventRecord,
 } from './store-types.ts';
 
@@ -203,6 +221,122 @@ interface RawAgentExecutionLogRow {
   details_json: string;
   secrets_redacted: number;
   created_at: string;
+}
+
+interface RawManagedAgentRow {
+  id: string;
+  name: string;
+  department: ManagedAgentDepartment;
+  role: string;
+  description: string;
+  status: ManagedAgentStatus;
+  enabled: number;
+  permitted_autonomy_level: ManagedAgentRecord['permitted_autonomy_level'];
+  allowed_tool_ids_json: string;
+  preferred_model_ids_json: string;
+  backup_model_ids_json: string;
+  max_concurrent_jobs: number;
+  timeout_ms: number;
+  allowed_paths_json: string;
+  network_mode: SandboxNetworkMode;
+  last_health_status: ManagedAgentHealth;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  schema_version: string;
+}
+
+interface RawManagedModelRow {
+  model_id: string;
+  model_name: string;
+  model_family: string;
+  model_version: string;
+  source: ManagedModelSource;
+  repo_id: string;
+  revision: string;
+  local_model_path: string | null;
+  controlled_runtime_endpoint: string | null;
+  runtime_type: string;
+  compatibility_status: ManagedModelRecord['compatibility_status'];
+  modality: ManagedModelRecord['modality'];
+  capabilities_json: string;
+  hardware_requirements_json: string;
+  quantization: string;
+  context_length: number;
+  size_mb: number;
+  format: string;
+  install_status: ModelInstallStatus;
+  verified_on_disk: number;
+  is_default: number;
+  is_backup: number;
+  enabled: number;
+  availability: string;
+  license_json: string;
+  node_id: string | null;
+  last_verified_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawManagedWorkerRow {
+  worker_id: string;
+  name: string;
+  runtime_type: string;
+  node_id: string;
+  base_url: string;
+  requires_auth: number;
+  auth_token_env_var: string | null;
+  enabled: number;
+  health_status: ManagedWorkerHealthStatus;
+  current_model_id: string | null;
+  active_jobs: number;
+  queue_length: number;
+  latency_ms: number | null;
+  discovered_models_json: string;
+  last_checked_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawManagedProjectRow {
+  project_id: string;
+  name: string;
+  slug: string;
+  project_type: ManagedProjectType;
+  description: string;
+  domain_url: string | null;
+  workspace_path: string;
+  environment: OrchestratedTaskRecord['environment'];
+  deployment_status: ManagedProjectDeploymentStatus;
+  health_status: ManagedProjectHealthStatus;
+  assigned_agent_ids_json: string;
+  recent_changes_json: string;
+  recent_errors_json: string;
+  pending_approval_id: string | null;
+  last_deployed_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawSystemConfigRow {
+  config_key: string;
+  config_value_json: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+interface RawSystemBackupRow {
+  backup_id: string;
+  filename: string;
+  size_bytes: number;
+  sha256: string;
+  summary_json: string;
+  created_by: string;
+  created_at: string;
+  restored_at: string | null;
 }
 
 function assertSafeDbFilePath(dbPath: string): string {
@@ -413,6 +547,136 @@ function hydrateAgentExecutionLogRow(
   };
 }
 
+function hydrateManagedAgentRow(row: RawManagedAgentRow): ManagedAgentRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    department: row.department,
+    role: row.role,
+    description: row.description,
+    status: row.status,
+    enabled: row.enabled === 1,
+    permitted_autonomy_level: row.permitted_autonomy_level,
+    allowed_tool_ids: JSON.parse(row.allowed_tool_ids_json) as string[],
+    preferred_model_ids: JSON.parse(row.preferred_model_ids_json) as string[],
+    backup_model_ids: JSON.parse(row.backup_model_ids_json) as string[],
+    max_concurrent_jobs: row.max_concurrent_jobs,
+    timeout_ms: row.timeout_ms,
+    allowed_paths: JSON.parse(row.allowed_paths_json) as string[],
+    network_mode: row.network_mode,
+    last_health_status: row.last_health_status,
+    created_by: row.created_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    schema_version: row.schema_version,
+  };
+}
+
+function hydrateManagedModelRow(row: RawManagedModelRow): ManagedModelRecord {
+  return {
+    model_id: row.model_id,
+    model_name: row.model_name,
+    model_family: row.model_family,
+    model_version: row.model_version,
+    source: row.source,
+    repo_id: row.repo_id,
+    revision: row.revision,
+    local_model_path: row.local_model_path,
+    controlled_runtime_endpoint: row.controlled_runtime_endpoint,
+    runtime_type: row.runtime_type,
+    compatibility_status: row.compatibility_status,
+    modality: row.modality,
+    capabilities: JSON.parse(row.capabilities_json) as string[],
+    hardware_requirements: JSON.parse(
+      row.hardware_requirements_json,
+    ) as ManagedModelRecord['hardware_requirements'],
+    quantization: row.quantization,
+    context_length: row.context_length,
+    size_mb: row.size_mb,
+    format: row.format,
+    install_status: row.install_status,
+    verified_on_disk: row.verified_on_disk === 1,
+    is_default: row.is_default === 1,
+    is_backup: row.is_backup === 1,
+    enabled: row.enabled === 1,
+    availability: row.availability,
+    license: JSON.parse(row.license_json) as ManagedModelRecord['license'],
+    node_id: row.node_id,
+    last_verified_at: row.last_verified_at,
+    last_error: row.last_error,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function hydrateManagedWorkerRow(row: RawManagedWorkerRow): ManagedWorkerRecord {
+  return {
+    worker_id: row.worker_id,
+    name: row.name,
+    runtime_type: row.runtime_type,
+    node_id: row.node_id,
+    base_url: row.base_url,
+    requires_auth: row.requires_auth === 1,
+    auth_token_env_var: row.auth_token_env_var,
+    enabled: row.enabled === 1,
+    health_status: row.health_status,
+    current_model_id: row.current_model_id,
+    active_jobs: row.active_jobs,
+    queue_length: row.queue_length,
+    latency_ms: row.latency_ms,
+    discovered_models: JSON.parse(row.discovered_models_json) as string[],
+    last_checked_at: row.last_checked_at,
+    last_error: row.last_error,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function hydrateManagedProjectRow(row: RawManagedProjectRow): ManagedProjectRecord {
+  return {
+    project_id: row.project_id,
+    name: row.name,
+    slug: row.slug,
+    project_type: row.project_type,
+    description: row.description,
+    domain_url: row.domain_url,
+    workspace_path: row.workspace_path,
+    environment: row.environment,
+    deployment_status: row.deployment_status,
+    health_status: row.health_status,
+    assigned_agent_ids: JSON.parse(row.assigned_agent_ids_json) as string[],
+    recent_changes: JSON.parse(row.recent_changes_json) as ProjectChangeEntry[],
+    recent_errors: JSON.parse(row.recent_errors_json) as ProjectErrorEntry[],
+    pending_approval_id: row.pending_approval_id,
+    last_deployed_at: row.last_deployed_at,
+    created_by: row.created_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function hydrateSystemConfigRow(row: RawSystemConfigRow): SystemConfigEntry {
+  return {
+    config_key: row.config_key,
+    config_value: JSON.parse(row.config_value_json) as unknown,
+    updated_at: row.updated_at,
+    updated_by: row.updated_by,
+  };
+}
+
+function hydrateSystemBackupRow(row: RawSystemBackupRow): SystemBackupRecord {
+  return {
+    backup_id: row.backup_id,
+    filename: row.filename,
+    size_bytes: row.size_bytes,
+    sha256: row.sha256,
+    summary: JSON.parse(row.summary_json) as Record<string, unknown>,
+    created_by: row.created_by,
+    created_at: row.created_at,
+    restored_at: row.restored_at,
+  };
+}
+
 /**
  * Persistent SQLite-backed OrchestrationStore & ApprovalStore using Node 22
  * built-in `node:sqlite` (`DatabaseSync`) with WAL mode, migrations, contract
@@ -420,10 +684,12 @@ function hydrateAgentExecutionLogRow(
  */
 export class SqliteOrchestrationStore implements OrchestrationStore {
   private readonly db: DatabaseSync;
+  private readonly dbPath: string;
   private readonly migrations: AppliedMigrationRecord[];
 
   constructor(options: { dbPath: string }) {
     const safePath = assertSafeDbFilePath(options.dbPath);
+    this.dbPath = safePath;
     this.db = new DatabaseSync(safePath);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA synchronous = NORMAL;');
@@ -438,6 +704,59 @@ export class SqliteOrchestrationStore implements OrchestrationStore {
 
   getAppliedMigrations(): AppliedMigrationRecord[] {
     return [...this.migrations];
+  }
+
+  getDbPath(): string {
+    return this.dbPath;
+  }
+
+  getDatabaseStats(): DatabaseHealthStats {
+    const integrityRow = this.db
+      .prepare('PRAGMA integrity_check;')
+      .get() as { integrity_check?: string } | undefined;
+    const integrityMessage = integrityRow?.integrity_check ?? 'unknown';
+    const pageCountRow = this.db
+      .prepare('PRAGMA page_count;')
+      .get() as { page_count?: number } | undefined;
+    const pageSizeRow = this.db
+      .prepare('PRAGMA page_size;')
+      .get() as { page_size?: number } | undefined;
+    const pageCount = pageCountRow?.page_count ?? 0;
+    const pageSize = pageSizeRow?.page_size ?? 4096;
+
+    const countTable = (table: string): number => {
+      const row = this.db
+        .prepare(`SELECT COUNT(*) AS cnt FROM ${table}`)
+        .get() as { cnt: number };
+      return row.cnt;
+    };
+
+    let estimatedBytes = pageCount * pageSize;
+    if (this.dbPath !== ':memory:' && fs.existsSync(this.dbPath)) {
+      estimatedBytes = fs.statSync(this.dbPath).size;
+    }
+
+    return {
+      db_path: this.dbPath === ':memory:' ? ':memory:' : path.basename(this.dbPath),
+      integrity_ok: integrityMessage.toLowerCase() === 'ok',
+      integrity_message: integrityMessage,
+      page_count: pageCount,
+      page_size: pageSize,
+      estimated_bytes: estimatedBytes,
+      table_counts: {
+        tasks: countTable('tasks'),
+        schedules: countTable('schedules'),
+        approvals: countTable('approvals'),
+        execution_attempts: countTable('execution_attempts'),
+        agent_execution_jobs: countTable('agent_execution_jobs'),
+        agent_execution_logs: countTable('agent_execution_logs'),
+        managed_agents: countTable('managed_agents'),
+        managed_models: countTable('managed_models'),
+        managed_workers: countTable('managed_workers'),
+        managed_projects: countTable('managed_projects'),
+        system_backups: countTable('system_backups'),
+      },
+    };
   }
 
   close(): void {
@@ -674,6 +993,16 @@ export class SqliteOrchestrationStore implements OrchestrationStore {
         'SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at ASC',
       )
       .all(taskId) as unknown as RawEventRow[];
+    return rows.map(hydrateEventRow);
+  }
+
+  listRecentTaskEvents(limit = 100): TaskEventRecord[] {
+    const clamped = Math.min(Math.max(Math.round(limit), 1), 500);
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM task_events ORDER BY created_at DESC LIMIT ?',
+      )
+      .all(clamped) as unknown as RawEventRow[];
     return rows.map(hydrateEventRow);
   }
 
@@ -1735,5 +2064,602 @@ export class SqliteOrchestrationStore implements OrchestrationStore {
       )
       .all(...params) as unknown as RawAgentExecutionLogRow[];
     return rows.map(hydrateAgentExecutionLogRow);
+  }
+
+  // -------------------- Stage 4.5 Managed Agents --------------------
+
+  saveManagedAgent(record: ManagedAgentRecord): ManagedAgentRecord {
+    this.db
+      .prepare(
+        `INSERT INTO managed_agents (
+          id, name, department, role, description, status, enabled,
+          permitted_autonomy_level, allowed_tool_ids_json, preferred_model_ids_json,
+          backup_model_ids_json, max_concurrent_jobs, timeout_ms, allowed_paths_json,
+          network_mode, last_health_status, created_by, created_at, updated_at, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          department = excluded.department,
+          role = excluded.role,
+          description = excluded.description,
+          status = excluded.status,
+          enabled = excluded.enabled,
+          permitted_autonomy_level = excluded.permitted_autonomy_level,
+          allowed_tool_ids_json = excluded.allowed_tool_ids_json,
+          preferred_model_ids_json = excluded.preferred_model_ids_json,
+          backup_model_ids_json = excluded.backup_model_ids_json,
+          max_concurrent_jobs = excluded.max_concurrent_jobs,
+          timeout_ms = excluded.timeout_ms,
+          allowed_paths_json = excluded.allowed_paths_json,
+          network_mode = excluded.network_mode,
+          last_health_status = excluded.last_health_status,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.id,
+        record.name,
+        record.department,
+        record.role,
+        record.description,
+        record.status,
+        record.enabled ? 1 : 0,
+        record.permitted_autonomy_level,
+        JSON.stringify(record.allowed_tool_ids),
+        JSON.stringify(record.preferred_model_ids),
+        JSON.stringify(record.backup_model_ids),
+        record.max_concurrent_jobs,
+        record.timeout_ms,
+        JSON.stringify(record.allowed_paths),
+        record.network_mode,
+        record.last_health_status,
+        record.created_by,
+        record.created_at,
+        record.updated_at,
+        record.schema_version,
+      );
+    return this.getManagedAgent(record.id)!;
+  }
+
+  getManagedAgent(agentId: string): ManagedAgentRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM managed_agents WHERE id = ?')
+      .get(agentId) as unknown as RawManagedAgentRow | undefined;
+    return row ? hydrateManagedAgentRow(row) : null;
+  }
+
+  listManagedAgents(filter?: {
+    department?: ManagedAgentDepartment;
+    status?: ManagedAgentStatus;
+    limit?: number;
+    offset?: number;
+  }): { items: ManagedAgentRecord[]; total: number } {
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 250);
+    const offset = Math.max(filter?.offset ?? 0, 0);
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (filter?.department) {
+      clauses.push('department = ?');
+      params.push(filter.department);
+    }
+    if (filter?.status) {
+      clauses.push('status = ?');
+      params.push(filter.status);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS cnt FROM managed_agents ${where}`)
+      .get(...params) as { cnt: number };
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM managed_agents ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, limit, offset) as unknown as RawManagedAgentRow[];
+    return {
+      items: rows.map(hydrateManagedAgentRow),
+      total: countRow.cnt,
+    };
+  }
+
+  deleteManagedAgent(agentId: string): boolean {
+    const info = this.db
+      .prepare('DELETE FROM managed_agents WHERE id = ?')
+      .run(agentId);
+    return info.changes > 0;
+  }
+
+  // -------------------- Stage 4.5 Managed Models --------------------
+
+  saveManagedModel(record: ManagedModelRecord): ManagedModelRecord {
+    this.db
+      .prepare(
+        `INSERT INTO managed_models (
+          model_id, model_name, model_family, model_version, source, repo_id, revision,
+          local_model_path, controlled_runtime_endpoint, runtime_type, compatibility_status,
+          modality, capabilities_json, hardware_requirements_json, quantization, context_length,
+          size_mb, format, install_status, verified_on_disk, is_default, is_backup, enabled,
+          availability, license_json, node_id, last_verified_at, last_error, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(model_id) DO UPDATE SET
+          model_name = excluded.model_name,
+          model_family = excluded.model_family,
+          model_version = excluded.model_version,
+          source = excluded.source,
+          repo_id = excluded.repo_id,
+          revision = excluded.revision,
+          local_model_path = excluded.local_model_path,
+          controlled_runtime_endpoint = excluded.controlled_runtime_endpoint,
+          runtime_type = excluded.runtime_type,
+          compatibility_status = excluded.compatibility_status,
+          modality = excluded.modality,
+          capabilities_json = excluded.capabilities_json,
+          hardware_requirements_json = excluded.hardware_requirements_json,
+          quantization = excluded.quantization,
+          context_length = excluded.context_length,
+          size_mb = excluded.size_mb,
+          format = excluded.format,
+          install_status = excluded.install_status,
+          verified_on_disk = excluded.verified_on_disk,
+          is_default = excluded.is_default,
+          is_backup = excluded.is_backup,
+          enabled = excluded.enabled,
+          availability = excluded.availability,
+          license_json = excluded.license_json,
+          node_id = excluded.node_id,
+          last_verified_at = excluded.last_verified_at,
+          last_error = excluded.last_error,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.model_id,
+        record.model_name,
+        record.model_family,
+        record.model_version,
+        record.source,
+        record.repo_id,
+        record.revision,
+        record.local_model_path,
+        record.controlled_runtime_endpoint,
+        record.runtime_type,
+        record.compatibility_status,
+        record.modality,
+        JSON.stringify(record.capabilities),
+        JSON.stringify(record.hardware_requirements),
+        record.quantization,
+        record.context_length,
+        record.size_mb,
+        record.format,
+        record.install_status,
+        record.verified_on_disk ? 1 : 0,
+        record.is_default ? 1 : 0,
+        record.is_backup ? 1 : 0,
+        record.enabled ? 1 : 0,
+        record.availability,
+        JSON.stringify(record.license),
+        record.node_id,
+        record.last_verified_at,
+        record.last_error,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getManagedModel(record.model_id)!;
+  }
+
+  getManagedModel(modelId: string): ManagedModelRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM managed_models WHERE model_id = ?')
+      .get(modelId) as unknown as RawManagedModelRow | undefined;
+    return row ? hydrateManagedModelRow(row) : null;
+  }
+
+  listManagedModels(filter?: {
+    runtimeType?: string;
+    source?: ManagedModelSource;
+    limit?: number;
+    offset?: number;
+  }): { items: ManagedModelRecord[]; total: number } {
+    const limit = Math.min(Math.max(filter?.limit ?? 100, 1), 250);
+    const offset = Math.max(filter?.offset ?? 0, 0);
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (filter?.runtimeType) {
+      clauses.push('runtime_type = ?');
+      params.push(filter.runtimeType);
+    }
+    if (filter?.source) {
+      clauses.push('source = ?');
+      params.push(filter.source);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS cnt FROM managed_models ${where}`)
+      .get(...params) as { cnt: number };
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM managed_models ${where} ORDER BY is_default DESC, is_backup DESC, created_at ASC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, limit, offset) as unknown as RawManagedModelRow[];
+
+    return {
+      items: rows.map(hydrateManagedModelRow),
+      total: countRow.cnt,
+    };
+  }
+
+  setManagedModelRole(
+    modelId: string,
+    role: 'default' | 'backup',
+    updatedAt: string,
+  ): ManagedModelRecord | null {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.getManagedModel(modelId);
+      if (!existing) {
+        this.db.exec('ROLLBACK');
+        return null;
+      }
+      if (role === 'default') {
+        this.db
+          .prepare('UPDATE managed_models SET is_default = 0 WHERE is_default = 1')
+          .run();
+        this.db
+          .prepare(
+            'UPDATE managed_models SET is_default = 1, is_backup = 0, updated_at = ? WHERE model_id = ?',
+          )
+          .run(updatedAt, modelId);
+      } else {
+        this.db
+          .prepare('UPDATE managed_models SET is_backup = 0 WHERE is_backup = 1')
+          .run();
+        this.db
+          .prepare(
+            'UPDATE managed_models SET is_backup = 1, is_default = 0, updated_at = ? WHERE model_id = ?',
+          )
+          .run(updatedAt, modelId);
+      }
+      this.db.exec('COMMIT');
+      return this.getManagedModel(modelId);
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  deleteManagedModel(modelId: string): boolean {
+    const info = this.db
+      .prepare('DELETE FROM managed_models WHERE model_id = ?')
+      .run(modelId);
+    return info.changes > 0;
+  }
+
+  // -------------------- Stage 4.5 Managed Workers --------------------
+
+  saveManagedWorker(record: ManagedWorkerRecord): ManagedWorkerRecord {
+    this.db
+      .prepare(
+        `INSERT INTO managed_workers (
+          worker_id, name, runtime_type, node_id, base_url, requires_auth,
+          auth_token_env_var, enabled, health_status, current_model_id,
+          active_jobs, queue_length, latency_ms, discovered_models_json,
+          last_checked_at, last_error, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(worker_id) DO UPDATE SET
+          name = excluded.name,
+          runtime_type = excluded.runtime_type,
+          node_id = excluded.node_id,
+          base_url = excluded.base_url,
+          requires_auth = excluded.requires_auth,
+          auth_token_env_var = excluded.auth_token_env_var,
+          enabled = excluded.enabled,
+          health_status = excluded.health_status,
+          current_model_id = excluded.current_model_id,
+          active_jobs = excluded.active_jobs,
+          queue_length = excluded.queue_length,
+          latency_ms = excluded.latency_ms,
+          discovered_models_json = excluded.discovered_models_json,
+          last_checked_at = excluded.last_checked_at,
+          last_error = excluded.last_error,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.worker_id,
+        record.name,
+        record.runtime_type,
+        record.node_id,
+        record.base_url,
+        record.requires_auth ? 1 : 0,
+        record.auth_token_env_var,
+        record.enabled ? 1 : 0,
+        record.health_status,
+        record.current_model_id,
+        record.active_jobs,
+        record.queue_length,
+        record.latency_ms,
+        JSON.stringify(record.discovered_models),
+        record.last_checked_at,
+        record.last_error,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getManagedWorker(record.worker_id)!;
+  }
+
+  getManagedWorker(workerId: string): ManagedWorkerRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM managed_workers WHERE worker_id = ?')
+      .get(workerId) as unknown as RawManagedWorkerRow | undefined;
+    return row ? hydrateManagedWorkerRow(row) : null;
+  }
+
+  listManagedWorkers(filter?: {
+    limit?: number;
+    offset?: number;
+  }): { items: ManagedWorkerRecord[]; total: number } {
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 250);
+    const offset = Math.max(filter?.offset ?? 0, 0);
+    const countRow = this.db
+      .prepare('SELECT COUNT(*) AS cnt FROM managed_workers')
+      .get() as { cnt: number };
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM managed_workers ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      )
+      .all(limit, offset) as unknown as RawManagedWorkerRow[];
+    return {
+      items: rows.map(hydrateManagedWorkerRow),
+      total: countRow.cnt,
+    };
+  }
+
+  deleteManagedWorker(workerId: string): boolean {
+    const info = this.db
+      .prepare('DELETE FROM managed_workers WHERE worker_id = ?')
+      .run(workerId);
+    return info.changes > 0;
+  }
+
+  // -------------------- Stage 4.5 Managed Projects --------------------
+
+  saveManagedProject(record: ManagedProjectRecord): ManagedProjectRecord {
+    this.db
+      .prepare(
+        `INSERT INTO managed_projects (
+          project_id, name, slug, project_type, description, domain_url,
+          workspace_path, environment, deployment_status, health_status,
+          assigned_agent_ids_json, recent_changes_json, recent_errors_json,
+          pending_approval_id, last_deployed_at, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+          name = excluded.name,
+          slug = excluded.slug,
+          project_type = excluded.project_type,
+          description = excluded.description,
+          domain_url = excluded.domain_url,
+          workspace_path = excluded.workspace_path,
+          environment = excluded.environment,
+          deployment_status = excluded.deployment_status,
+          health_status = excluded.health_status,
+          assigned_agent_ids_json = excluded.assigned_agent_ids_json,
+          recent_changes_json = excluded.recent_changes_json,
+          recent_errors_json = excluded.recent_errors_json,
+          pending_approval_id = excluded.pending_approval_id,
+          last_deployed_at = excluded.last_deployed_at,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        record.project_id,
+        record.name,
+        record.slug,
+        record.project_type,
+        record.description,
+        record.domain_url,
+        record.workspace_path,
+        record.environment,
+        record.deployment_status,
+        record.health_status,
+        JSON.stringify(record.assigned_agent_ids),
+        JSON.stringify(record.recent_changes),
+        JSON.stringify(record.recent_errors),
+        record.pending_approval_id,
+        record.last_deployed_at,
+        record.created_by,
+        record.created_at,
+        record.updated_at,
+      );
+    return this.getManagedProject(record.project_id)!;
+  }
+
+  getManagedProject(projectId: string): ManagedProjectRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM managed_projects WHERE project_id = ?')
+      .get(projectId) as unknown as RawManagedProjectRow | undefined;
+    return row ? hydrateManagedProjectRow(row) : null;
+  }
+
+  getManagedProjectBySlug(slug: string): ManagedProjectRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM managed_projects WHERE slug = ?')
+      .get(slug) as unknown as RawManagedProjectRow | undefined;
+    return row ? hydrateManagedProjectRow(row) : null;
+  }
+
+  listManagedProjects(filter?: {
+    environment?: OrchestratedTaskRecord['environment'];
+    limit?: number;
+    offset?: number;
+  }): { items: ManagedProjectRecord[]; total: number } {
+    const limit = Math.min(Math.max(filter?.limit ?? 50, 1), 250);
+    const offset = Math.max(filter?.offset ?? 0, 0);
+    const clauses: string[] = [];
+    const params: (string | number)[] = [];
+    if (filter?.environment) {
+      clauses.push('environment = ?');
+      params.push(filter.environment);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const countRow = this.db
+      .prepare(`SELECT COUNT(*) AS cnt FROM managed_projects ${where}`)
+      .get(...params) as { cnt: number };
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM managed_projects ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, limit, offset) as unknown as RawManagedProjectRow[];
+    return {
+      items: rows.map(hydrateManagedProjectRow),
+      total: countRow.cnt,
+    };
+  }
+
+  deleteManagedProject(projectId: string): boolean {
+    const info = this.db
+      .prepare('DELETE FROM managed_projects WHERE project_id = ?')
+      .run(projectId);
+    return info.changes > 0;
+  }
+
+  // -------------------- Stage 4.5 System Config KV & Backups --------------------
+
+  getSystemConfigEntry(configKey: string): SystemConfigEntry | null {
+    const row = this.db
+      .prepare('SELECT * FROM system_config_kv WHERE config_key = ?')
+      .get(configKey) as unknown as RawSystemConfigRow | undefined;
+    return row ? hydrateSystemConfigRow(row) : null;
+  }
+
+  setSystemConfigEntry(entry: SystemConfigEntry): SystemConfigEntry {
+    this.db
+      .prepare(
+        `INSERT INTO system_config_kv (config_key, config_value_json, updated_at, updated_by)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(config_key) DO UPDATE SET
+           config_value_json = excluded.config_value_json,
+           updated_at = excluded.updated_at,
+           updated_by = excluded.updated_by`,
+      )
+      .run(
+        entry.config_key,
+        JSON.stringify(entry.config_value),
+        entry.updated_at,
+        entry.updated_by,
+      );
+    return this.getSystemConfigEntry(entry.config_key)!;
+  }
+
+  listSystemConfigEntries(): SystemConfigEntry[] {
+    const rows = this.db
+      .prepare('SELECT * FROM system_config_kv ORDER BY config_key ASC')
+      .all() as unknown as RawSystemConfigRow[];
+    return rows.map(hydrateSystemConfigRow);
+  }
+
+  saveSystemBackup(record: SystemBackupRecord): SystemBackupRecord {
+    this.db
+      .prepare(
+        `INSERT INTO system_backups (
+          backup_id, filename, size_bytes, sha256, summary_json,
+          created_by, created_at, restored_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.backup_id,
+        record.filename,
+        record.size_bytes,
+        record.sha256,
+        JSON.stringify(record.summary),
+        record.created_by,
+        record.created_at,
+        record.restored_at,
+      );
+    return this.getSystemBackup(record.backup_id)!;
+  }
+
+  getSystemBackup(backupId: string): SystemBackupRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM system_backups WHERE backup_id = ?')
+      .get(backupId) as unknown as RawSystemBackupRow | undefined;
+    return row ? hydrateSystemBackupRow(row) : null;
+  }
+
+  listSystemBackups(limit = 50): SystemBackupRecord[] {
+    const clamped = Math.min(Math.max(Math.round(limit), 1), 200);
+    const rows = this.db
+      .prepare('SELECT * FROM system_backups ORDER BY created_at DESC LIMIT ?')
+      .all(clamped) as unknown as RawSystemBackupRow[];
+    return rows.map(hydrateSystemBackupRow);
+  }
+
+  markSystemBackupRestored(backupId: string, restoredAt: string): void {
+    this.db
+      .prepare('UPDATE system_backups SET restored_at = ? WHERE backup_id = ?')
+      .run(restoredAt, backupId);
+  }
+
+  exportManagementSnapshot(): Record<string, unknown> {
+    return {
+      schema_version: '1.0.0',
+      agents: this.listManagedAgents({ limit: 250 }).items,
+      models: this.listManagedModels({ limit: 250 }).items,
+      workers: this.listManagedWorkers({ limit: 250 }).items,
+      projects: this.listManagedProjects({ limit: 250 }).items,
+      schedules: this.listSchedules(),
+      config: this.listSystemConfigEntries(),
+    };
+  }
+
+  restoreManagementSnapshot(snapshot: Record<string, unknown>): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const agents = Array.isArray(snapshot.agents)
+        ? (snapshot.agents as ManagedAgentRecord[])
+        : [];
+      const models = Array.isArray(snapshot.models)
+        ? (snapshot.models as ManagedModelRecord[])
+        : [];
+      const workers = Array.isArray(snapshot.workers)
+        ? (snapshot.workers as ManagedWorkerRecord[])
+        : [];
+      const projects = Array.isArray(snapshot.projects)
+        ? (snapshot.projects as ManagedProjectRecord[])
+        : [];
+      const configs = Array.isArray(snapshot.config)
+        ? (snapshot.config as SystemConfigEntry[])
+        : [];
+
+      this.db.exec('DELETE FROM managed_agents');
+      for (const a of agents) {
+        this.saveManagedAgent(a);
+      }
+
+      this.db.exec('DELETE FROM managed_models');
+      for (const m of models) {
+        this.saveManagedModel(m);
+      }
+
+      this.db.exec('DELETE FROM managed_workers');
+      for (const w of workers) {
+        this.saveManagedWorker(w);
+      }
+
+      this.db.exec('DELETE FROM managed_projects');
+      for (const p of projects) {
+        this.saveManagedProject(p);
+      }
+
+      this.db.exec('DELETE FROM system_config_kv');
+      for (const c of configs) {
+        this.setSystemConfigEntry(c);
+      }
+
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 }

@@ -20,10 +20,12 @@ export { LoginRateLimiter } from './rate-limiter.ts';
 export type { RateLimitCheckResult } from './rate-limiter.ts';
 
 export {
+  DEV_LOOPBACK_COOKIE_NAME,
   SessionManager,
   buildClearSessionCookieHeader,
   buildSessionSetCookieHeader,
   parseSessionTokenFromCookieHeader,
+  resolveSessionTransportMode,
 } from './session-manager.ts';
 export type {
   IssuedSession,
@@ -39,6 +41,7 @@ export {
 export type { TejauraAuthenticatedRequest } from './http-handlers.ts';
 
 export type {
+  ActiveSessionSummary,
   AuthFailureResult,
   AuthRequestContext,
   AuthenticatedSessionContext,
@@ -50,10 +53,13 @@ export type {
   MfaChallengeModule,
   MfaChallengeVerificationInput,
   MfaEnrollmentResult,
+  MfaFactorSummary,
   MfaVerificationResult,
+  OwnerProfileSummary,
   PasskeyAssertionPayload,
   PasskeyVerificationInput,
   PasskeyVerificationResult,
   PasskeyVerifierModule,
   RecoverAccountInput,
+  SessionTransportMode,
 } from './auth-types.ts';

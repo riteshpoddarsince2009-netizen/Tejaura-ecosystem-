@@ -32,6 +32,7 @@ import type {
   StoredRecoveryCode,
 } from '../security/index.ts';
 import type {
+  ActiveSessionSummary,
   AuthFailureResult,
   AuthRequestContext,
   AuthenticatedSessionContext,
@@ -41,8 +42,11 @@ import type {
   LoginInput,
   LoginSuccessResult,
   MfaEnrollmentResult,
+  MfaFactorSummary,
+  OwnerProfileSummary,
   PasskeyAssertionPayload,
   RecoverAccountInput,
+  SessionTransportMode,
 } from './auth-types.ts';
 import {
   MfaModuleRegistry,
@@ -54,6 +58,7 @@ import {
   SessionManager,
   buildClearSessionCookieHeader,
   parseSessionTokenFromCookieHeader,
+  resolveSessionTransportMode,
 } from './session-manager.ts';
 
 const FORBIDDEN_PUBLIC_DIR_NAMES = new Set([
@@ -271,17 +276,37 @@ export class TejauraAuthService {
     return this.dummyHashCache;
   }
 
-  private checkTransport(request?: AuthRequestContext): AuthFailureResult | null {
-    if (!request) return null;
+  private resolveTransport(request?: AuthRequestContext):
+    | { ok: true; protocol: 'https' | 'http-loopback-dev'; mode: SessionTransportMode }
+    | { ok: false; failure: AuthFailureResult } {
+    if (!request) {
+      return { ok: true, protocol: 'https', mode: 'https_direct' };
+    }
     const res = enforceHttpsTransport(request, this.config.transport);
     if (!res.allowed) {
       return {
         ok: false,
-        code: res.code,
-        error: res.error,
+        failure: {
+          ok: false,
+          code: res.code,
+          error: res.error,
+        },
       };
     }
-    return null;
+    return {
+      ok: true,
+      protocol: res.protocol,
+      mode: resolveSessionTransportMode({
+        protocol: res.protocol,
+        secFetchSite: request.secFetchSite,
+        secFetchDest: request.secFetchDest,
+      }),
+    };
+  }
+
+  private checkTransport(request?: AuthRequestContext): AuthFailureResult | null {
+    const resolved = this.resolveTransport(request);
+    return resolved.ok ? null : resolved.failure;
   }
 
   private buildAuthenticatedContext(
@@ -429,10 +454,21 @@ export class TejauraAuthService {
     const { plaintextCodes, hashedRecords } = await this.generateRecoveryCodes();
     const nowIso = this.clock().toISOString();
 
+    const displayName =
+      typeof input.display_name === 'string' && input.display_name.trim().length > 0
+        ? input.display_name.trim().slice(0, 100)
+        : username;
+    const timezone =
+      typeof input.timezone === 'string' && input.timezone.trim().length > 0
+        ? input.timezone.trim().slice(0, 64)
+        : 'UTC';
+
     const ownerRecord: StoredOwnerAccount = {
       owner_id: ownerId,
       username,
       email,
+      display_name: displayName,
+      timezone,
       password_hash: passwordHash,
       role: 'owner',
       created_at: nowIso,
@@ -700,10 +736,14 @@ export class TejauraAuthService {
 
     this.rateLimiter.reset(identifier, clientIp);
 
+    const resolvedTransport = this.resolveTransport(input.request);
+    const transportMode = resolvedTransport.ok ? resolvedTransport.mode : 'https_direct';
+
     const { issued, updatedSessions } = this.sessionManager.createSession({
       actorId: owner.owner_id,
       role: 'owner',
       existingSessions: snapshot.sessions,
+      transportMode,
       metadata: {
         client_ip: clientIp,
         user_agent: input.request?.userAgent,
@@ -718,7 +758,10 @@ export class TejauraAuthService {
       action: 'auth:login',
       outcome: 'success',
       correlation_id: input.correlation_id,
-      metadata: { session_id: issued.record.session_id },
+      metadata: {
+        session_id: issued.record.session_id,
+        transport_mode: issued.transportMode,
+      },
     });
     if (!auditOk) {
       return {
@@ -743,6 +786,7 @@ export class TejauraAuthService {
         issued.record.session_id,
       ),
       set_cookie_header: issued.setCookieHeader,
+      transport_mode: issued.transportMode,
     };
   }
 
@@ -902,10 +946,14 @@ export class TejauraAuthService {
       ),
     };
 
+    const resolvedTransport = this.resolveTransport(params.request);
+    const transportMode = resolvedTransport.ok ? resolvedTransport.mode : 'https_direct';
+
     const { issued, updatedSessions } = this.sessionManager.createSession({
       actorId: owner.owner_id,
       role: 'owner',
       existingSessions: snapshot.sessions,
+      transportMode,
       metadata: {
         client_ip: clientIp,
         user_agent: params.request?.userAgent,
@@ -923,6 +971,7 @@ export class TejauraAuthService {
       metadata: {
         credential_id: credential.credential_id,
         session_id: issued.record.session_id,
+        transport_mode: issued.transportMode,
       },
     });
     if (!auditOk) {
@@ -948,6 +997,7 @@ export class TejauraAuthService {
         issued.record.session_id,
       ),
       set_cookie_header: issued.setCookieHeader,
+      transport_mode: issued.transportMode,
     };
   }
 
@@ -957,12 +1007,16 @@ export class TejauraAuthService {
   ):
     | { ok: true; session: AuthenticatedSessionContext }
     | AuthFailureResult {
-    const transportFailure = this.checkTransport(request);
-    if (transportFailure) return transportFailure;
+    const resolvedTransport = this.resolveTransport(request);
+    if (!resolvedTransport.ok) return resolvedTransport.failure;
+
+    const allowDevLoopbackFallback =
+      resolvedTransport.protocol === 'http-loopback-dev';
 
     const rawToken = parseSessionTokenFromCookieHeader(
       cookieHeader,
       this.config.session.cookieName,
+      allowDevLoopbackFallback,
     );
     if (!rawToken) {
       return {
@@ -1020,15 +1074,33 @@ export class TejauraAuthService {
   logout(params: {
     cookieHeader: string | undefined;
     correlation_id: string;
-  }): { ok: true; clear_cookie_header: string } {
+    request?: AuthRequestContext;
+  }): { ok: true; clear_cookie_header: string; clear_cookie_headers: string[] } {
+    const resolvedTransport = this.resolveTransport(params.request);
+    const transportMode = resolvedTransport.ok ? resolvedTransport.mode : 'https_direct';
+    const allowDevFallback =
+      resolvedTransport.ok && resolvedTransport.protocol === 'http-loopback-dev';
+
     const rawToken = parseSessionTokenFromCookieHeader(
       params.cookieHeader,
       this.config.session.cookieName,
+      allowDevFallback || !params.request,
     );
-    const clearHeader = buildClearSessionCookieHeader(this.config.session);
+    const primaryClearHeader = buildClearSessionCookieHeader(
+      this.config.session,
+      transportMode,
+    );
+    const clearHeaders = [primaryClearHeader];
+    if (allowDevFallback) {
+      clearHeaders.push(buildClearSessionCookieHeader(this.config.session, 'https_direct'));
+    }
 
     if (!rawToken) {
-      return { ok: true, clear_cookie_header: clearHeader };
+      return {
+        ok: true,
+        clear_cookie_header: primaryClearHeader,
+        clear_cookie_headers: clearHeaders,
+      };
     }
 
     const snapshot = this.store.load();
@@ -1056,7 +1128,11 @@ export class TejauraAuthService {
       });
     }
 
-    return { ok: true, clear_cookie_header: clearHeader };
+    return {
+      ok: true,
+      clear_cookie_header: primaryClearHeader,
+      clear_cookie_headers: clearHeaders,
+    };
   }
 
   revokeSession(params: {
@@ -1512,5 +1588,685 @@ export class TejauraAuthService {
     });
 
     return { ok: true, credential_id: passkey.credential_id };
+  }
+
+  // -------------------- Stage 4.5 Owner Profile, MFA & Session Controls --------------------
+
+  getOwnerProfile(params: {
+    principal: RbacPrincipal;
+    correlation_id: string;
+  }): { ok: true; profile: OwnerProfileSummary } | AuthFailureResult {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    const owner = snapshot.owner;
+    return {
+      ok: true,
+      profile: {
+        owner_id: owner.owner_id,
+        username: owner.username,
+        email: owner.email,
+        display_name: owner.display_name ?? owner.username,
+        timezone: owner.timezone ?? 'UTC',
+        role: 'owner',
+        created_at: owner.created_at,
+        updated_at: owner.updated_at,
+        mfa_enabled_count: owner.mfa_factors.filter((f) => f.enabled).length,
+        passkeys_count: owner.passkeys.length,
+        recovery_codes_total: owner.recovery_codes.length,
+        recovery_codes_remaining: owner.recovery_codes.filter((c) => c.used_at === null)
+          .length,
+      },
+    };
+  }
+
+  updateOwnerProfile(params: {
+    principal: RbacPrincipal;
+    display_name?: string;
+    email?: string;
+    timezone?: string;
+    correlation_id: string;
+  }): { ok: true; profile: OwnerProfileSummary } | AuthFailureResult {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    const owner = snapshot.owner;
+    const nextEmail =
+      params.email !== undefined ? params.email.trim().toLowerCase() : owner.email;
+    if (!EMAIL_PATTERN.test(nextEmail)) {
+      return {
+        ok: false,
+        code: 'INVALID_EMAIL',
+        error: 'A valid owner email address is required.',
+      };
+    }
+
+    const nextDisplayName =
+      params.display_name !== undefined
+        ? params.display_name.trim().slice(0, 100)
+        : (owner.display_name ?? owner.username);
+    if (nextDisplayName.length === 0) {
+      return {
+        ok: false,
+        code: 'INVALID_DISPLAY_NAME',
+        error: 'Display name must be between 1 and 100 characters.',
+      };
+    }
+
+    const nextTimezone =
+      params.timezone !== undefined
+        ? params.timezone.trim().slice(0, 64)
+        : (owner.timezone ?? 'UTC');
+    if (nextTimezone.length === 0) {
+      return {
+        ok: false,
+        code: 'INVALID_TIMEZONE',
+        error: 'Timezone must be a valid non-empty string.',
+      };
+    }
+
+    const nowIso = this.clock().toISOString();
+    const updatedOwner: StoredOwnerAccount = {
+      ...owner,
+      email: nextEmail,
+      display_name: nextDisplayName,
+      timezone: nextTimezone,
+      updated_at: nowIso,
+    };
+
+    const auditOk = this.auditAuth({
+      actor_type: 'owner',
+      actor_id: owner.owner_id,
+      event_type: 'auth.profile.updated',
+      resource_id: `owner:${owner.owner_id}`,
+      action: 'auth:update_profile',
+      outcome: 'success',
+      correlation_id: params.correlation_id,
+      metadata: {
+        email_changed: nextEmail !== owner.email,
+        timezone: nextTimezone,
+      },
+    });
+    if (!auditOk) {
+      return {
+        ok: false,
+        code: 'AUDIT_STORAGE_FAILURE',
+        error: 'Profile update aborted because security audit logging failed.',
+      };
+    }
+
+    this.store.save({
+      ...snapshot,
+      owner: updatedOwner,
+    });
+
+    return this.getOwnerProfile({
+      principal: params.principal,
+      correlation_id: params.correlation_id,
+    });
+  }
+
+  async changePassword(params: {
+    principal: RbacPrincipal;
+    current_password: string;
+    new_password: string;
+    keep_session_id?: string;
+    correlation_id: string;
+  }): Promise<{ ok: true; revoked_other_sessions: number } | AuthFailureResult> {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    const currentOk = await verifySecretArgon2id(
+      params.current_password,
+      snapshot.owner.password_hash,
+    );
+    if (!currentOk) {
+      this.auditAuth({
+        actor_type: 'owner',
+        actor_id: snapshot.owner.owner_id,
+        event_type: 'auth.password.changed',
+        resource_id: `owner:${snapshot.owner.owner_id}`,
+        action: 'auth:change_password',
+        outcome: 'failure',
+        correlation_id: params.correlation_id,
+        metadata: { reason_code: 'INVALID_CURRENT_PASSWORD' },
+      });
+      return {
+        ok: false,
+        code: 'INVALID_CURRENT_PASSWORD',
+        error: 'Current password is incorrect.',
+      };
+    }
+
+    const strength = validatePasswordStrength(
+      params.new_password,
+      this.config.passwordPolicy,
+    );
+    if (!strength.valid) {
+      return { ok: false, code: strength.code, error: strength.error };
+    }
+
+    if (this.secretsManager) {
+      const distinctCheck =
+        this.secretsManager.assertPasswordDistinctFromWorkerToken(
+          params.new_password,
+        );
+      if (!distinctCheck.ok) {
+        return {
+          ok: false,
+          code: distinctCheck.code,
+          error: distinctCheck.error,
+        };
+      }
+    }
+
+    const newHash = await hashSecretArgon2id(
+      params.new_password,
+      this.config.argon2id,
+    );
+    const nowIso = this.clock().toISOString();
+
+    const revokeOthers = params.keep_session_id
+      ? this.sessionManager.revokeOtherSessionsForActor(
+          snapshot.owner.owner_id,
+          params.keep_session_id,
+          snapshot.sessions,
+          'password_changed',
+        )
+      : { revokedCount: 0, updatedSessions: snapshot.sessions };
+
+    const updatedOwner: StoredOwnerAccount = {
+      ...snapshot.owner,
+      password_hash: newHash,
+      updated_at: nowIso,
+    };
+
+    const auditOk = this.auditAuth({
+      actor_type: 'owner',
+      actor_id: snapshot.owner.owner_id,
+      event_type: 'auth.password.changed',
+      resource_id: `owner:${snapshot.owner.owner_id}`,
+      action: 'auth:change_password',
+      outcome: 'success',
+      correlation_id: params.correlation_id,
+      metadata: { revoked_other_sessions: revokeOthers.revokedCount },
+    });
+    if (!auditOk) {
+      return {
+        ok: false,
+        code: 'AUDIT_STORAGE_FAILURE',
+        error: 'Password change aborted because security audit logging failed.',
+      };
+    }
+
+    this.store.save({
+      ...snapshot,
+      owner: updatedOwner,
+      sessions: revokeOthers.updatedSessions,
+    });
+
+    return { ok: true, revoked_other_sessions: revokeOthers.revokedCount };
+  }
+
+  listSessions(params: {
+    principal: RbacPrincipal;
+    current_session_id?: string;
+    include_revoked?: boolean;
+    correlation_id: string;
+  }): { ok: true; sessions: ActiveSessionSummary[] } | AuthFailureResult {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    const nowMs = this.clock().getTime();
+    const items: ActiveSessionSummary[] = [];
+
+    for (const s of snapshot.sessions) {
+      if (s.actor_id !== params.principal.actor_id) continue;
+      const isExpired =
+        new Date(s.expires_at).getTime() <= nowMs ||
+        new Date(s.idle_expires_at).getTime() <= nowMs;
+      if (!params.include_revoked && (s.revoked_at !== null || isExpired)) {
+        continue;
+      }
+      const meta = this.sessionManager.decryptSessionMetadata(s);
+      items.push({
+        session_id: s.session_id,
+        actor_id: s.actor_id,
+        role: s.role,
+        created_at: s.created_at,
+        last_seen_at: s.last_seen_at,
+        idle_expires_at: s.idle_expires_at,
+        expires_at: s.expires_at,
+        revoked_at: s.revoked_at,
+        revocation_reason: s.revocation_reason,
+        is_current: s.session_id === params.current_session_id,
+        client_ip: meta?.client_ip ?? null,
+        user_agent: meta?.user_agent ?? null,
+      });
+    }
+
+    items.sort(
+      (a, b) =>
+        new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime(),
+    );
+    return { ok: true, sessions: items };
+  }
+
+  revokeOtherSessions(params: {
+    principal: RbacPrincipal;
+    keep_session_id: string;
+    correlation_id: string;
+  }): { ok: true; revoked_count: number } | AuthFailureResult {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    const { revokedCount, updatedSessions } =
+      this.sessionManager.revokeOtherSessionsForActor(
+        params.principal.actor_id,
+        params.keep_session_id,
+        snapshot.sessions,
+        'owner_revoked_other_sessions',
+      );
+
+    const auditOk = this.auditAuth({
+      actor_type: 'owner',
+      actor_id: params.principal.actor_id,
+      event_type: 'auth.session.revoked_others',
+      resource_id: `owner:${params.principal.actor_id}`,
+      action: 'auth:revoke_other_sessions',
+      outcome: 'success',
+      correlation_id: params.correlation_id,
+      metadata: {
+        keep_session_id: params.keep_session_id,
+        revoked_count: revokedCount,
+      },
+    });
+    if (!auditOk) {
+      return {
+        ok: false,
+        code: 'AUDIT_STORAGE_FAILURE',
+        error: 'Session revocation aborted because security audit logging failed.',
+      };
+    }
+
+    this.store.save({
+      ...snapshot,
+      sessions: updatedSessions,
+    });
+
+    return { ok: true, revoked_count: revokedCount };
+  }
+
+  listMfaFactors(params: {
+    principal: RbacPrincipal;
+    correlation_id: string;
+  }):
+    | {
+        ok: true;
+        factors: MfaFactorSummary[];
+        passkeys: Array<{
+          credential_id: string;
+          label: string;
+          algorithm: string;
+          registered_at: string;
+          last_used_at: string | null;
+        }>;
+      }
+    | AuthFailureResult {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    return {
+      ok: true,
+      factors: snapshot.owner.mfa_factors.map((f) => ({
+        factor_id: f.factor_id,
+        type: f.type,
+        label: f.label,
+        enabled: f.enabled,
+        enrolled_at: f.enrolled_at,
+        last_used_step: f.last_used_step,
+      })),
+      passkeys: snapshot.owner.passkeys.map((p) => ({
+        credential_id: p.credential_id,
+        label: p.label,
+        algorithm: p.algorithm,
+        registered_at: p.registered_at,
+        last_used_at: p.last_used_at,
+      })),
+    };
+  }
+
+  async toggleMfaFactor(params: {
+    principal: RbacPrincipal;
+    factor_id: string;
+    enabled: boolean;
+    current_password: string;
+    correlation_id: string;
+  }): Promise<{ ok: true; factor: MfaFactorSummary } | AuthFailureResult> {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `mfa:${params.factor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    const pwValid = await verifySecretArgon2id(
+      params.current_password,
+      snapshot.owner.password_hash,
+    );
+    if (!pwValid) {
+      return {
+        ok: false,
+        code: 'INVALID_CURRENT_PASSWORD',
+        error: 'Current owner password verification is required to change MFA status.',
+      };
+    }
+
+    const target = snapshot.owner.mfa_factors.find(
+      (f) => f.factor_id === params.factor_id,
+    );
+    if (!target) {
+      return {
+        ok: false,
+        code: 'MFA_FACTOR_NOT_FOUND',
+        error: 'Target MFA factor was not found.',
+      };
+    }
+
+    const nowIso = this.clock().toISOString();
+    const updatedFactors = snapshot.owner.mfa_factors.map((f) =>
+      f.factor_id === params.factor_id ? { ...f, enabled: params.enabled } : f,
+    );
+
+    const auditOk = this.auditAuth({
+      actor_type: 'owner',
+      actor_id: snapshot.owner.owner_id,
+      event_type: 'auth.mfa.toggled',
+      resource_id: `mfa:${params.factor_id}`,
+      action: 'auth:toggle_mfa',
+      outcome: 'success',
+      correlation_id: params.correlation_id,
+      metadata: { factor_id: params.factor_id, enabled: params.enabled },
+    });
+    if (!auditOk) {
+      return {
+        ok: false,
+        code: 'AUDIT_STORAGE_FAILURE',
+        error: 'MFA update aborted because security audit logging failed.',
+      };
+    }
+
+    this.store.save({
+      ...snapshot,
+      owner: {
+        ...snapshot.owner,
+        updated_at: nowIso,
+        mfa_factors: updatedFactors,
+      },
+    });
+
+    const next = updatedFactors.find((f) => f.factor_id === params.factor_id)!;
+    return {
+      ok: true,
+      factor: {
+        factor_id: next.factor_id,
+        type: next.type,
+        label: next.label,
+        enabled: next.enabled,
+        enrolled_at: next.enrolled_at,
+        last_used_step: next.last_used_step,
+      },
+    };
+  }
+
+  async removeMfaFactor(params: {
+    principal: RbacPrincipal;
+    factor_id: string;
+    current_password: string;
+    correlation_id: string;
+  }): Promise<{ ok: true; factor_id: string } | AuthFailureResult> {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `mfa:${params.factor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    const pwValid = await verifySecretArgon2id(
+      params.current_password,
+      snapshot.owner.password_hash,
+    );
+    if (!pwValid) {
+      return {
+        ok: false,
+        code: 'INVALID_CURRENT_PASSWORD',
+        error: 'Current owner password verification is required to remove an MFA factor.',
+      };
+    }
+
+    const exists = snapshot.owner.mfa_factors.some(
+      (f) => f.factor_id === params.factor_id,
+    );
+    if (!exists) {
+      return {
+        ok: false,
+        code: 'MFA_FACTOR_NOT_FOUND',
+        error: 'Target MFA factor was not found.',
+      };
+    }
+
+    const nowIso = this.clock().toISOString();
+    const auditOk = this.auditAuth({
+      actor_type: 'owner',
+      actor_id: snapshot.owner.owner_id,
+      event_type: 'auth.mfa.removed',
+      resource_id: `mfa:${params.factor_id}`,
+      action: 'auth:remove_mfa',
+      outcome: 'success',
+      correlation_id: params.correlation_id,
+      metadata: { factor_id: params.factor_id },
+    });
+    if (!auditOk) {
+      return {
+        ok: false,
+        code: 'AUDIT_STORAGE_FAILURE',
+        error: 'MFA removal aborted because security audit logging failed.',
+      };
+    }
+
+    this.store.save({
+      ...snapshot,
+      owner: {
+        ...snapshot.owner,
+        updated_at: nowIso,
+        mfa_factors: snapshot.owner.mfa_factors.filter(
+          (f) => f.factor_id !== params.factor_id,
+        ),
+      },
+    });
+
+    return { ok: true, factor_id: params.factor_id };
+  }
+
+  async regenerateRecoveryCodes(params: {
+    principal: RbacPrincipal;
+    current_password: string;
+    correlation_id: string;
+  }): Promise<{ ok: true; recovery_codes: string[] } | AuthFailureResult> {
+    const authz = authorizeRbac({
+      principal: params.principal,
+      permission: 'auth:admin',
+      resource_id: `owner:${params.principal.actor_id}`,
+      correlation_id: params.correlation_id,
+      auditLogger: this.auditLogger,
+    });
+    if (!authz.allowed) {
+      return { ok: false, code: authz.reason_code, error: authz.reason };
+    }
+
+    const snapshot = this.store.load();
+    if (!snapshot.owner || snapshot.owner.owner_id !== params.principal.actor_id) {
+      return {
+        ok: false,
+        code: 'OWNER_NOT_FOUND',
+        error: 'Authenticated owner account was not found.',
+      };
+    }
+
+    const pwValid = await verifySecretArgon2id(
+      params.current_password,
+      snapshot.owner.password_hash,
+    );
+    if (!pwValid) {
+      return {
+        ok: false,
+        code: 'INVALID_CURRENT_PASSWORD',
+        error: 'Current owner password verification is required to regenerate recovery codes.',
+      };
+    }
+
+    const { plaintextCodes, hashedRecords } = await this.generateRecoveryCodes();
+    const nowIso = this.clock().toISOString();
+
+    const auditOk = this.auditAuth({
+      actor_type: 'owner',
+      actor_id: snapshot.owner.owner_id,
+      event_type: 'auth.recovery.generated',
+      resource_id: `owner:${snapshot.owner.owner_id}`,
+      action: 'auth:regenerate_recovery_codes',
+      outcome: 'success',
+      correlation_id: params.correlation_id,
+      metadata: { code_count: plaintextCodes.length },
+    });
+    if (!auditOk) {
+      return {
+        ok: false,
+        code: 'AUDIT_STORAGE_FAILURE',
+        error: 'Recovery code regeneration aborted because security audit logging failed.',
+      };
+    }
+
+    this.store.save({
+      ...snapshot,
+      owner: {
+        ...snapshot.owner,
+        updated_at: nowIso,
+        recovery_codes: hashedRecords,
+      },
+    });
+
+    return { ok: true, recovery_codes: plaintextCodes };
   }
 }

@@ -187,6 +187,100 @@ export class RuntimeManager {
     };
   }
 
+  setTrustedEndpointEnabled(
+    endpointId: string,
+    enabled: boolean,
+    governance: RuntimeGovernanceContext,
+  ): RuntimeRegistrationResult {
+    const policy = evaluatePolicyWithAudit({
+      actor: governance.actor,
+      action: 'runtime:manage',
+      resource: {
+        id: `runtime:${endpointId}`,
+        type: 'system',
+      },
+      environment: governance.environment,
+      declared_scopes: governance.declared_scopes,
+      approval: governance.approval,
+      system_config: governance.system_config,
+      audit_logger: governance.audit_logger,
+      correlation_id: governance.correlation_id,
+      now: governance.now,
+    });
+
+    if (!policy.allowed) {
+      return {
+        ok: false,
+        code: policy.reason_code,
+        error: policy.reason,
+        policy,
+      };
+    }
+
+    const existing = this.trustedEndpoints.get(endpointId);
+    if (!existing) {
+      return {
+        ok: false,
+        code: 'ENDPOINT_NOT_FOUND',
+        error: `Trusted endpoint "${endpointId}" was not found.`,
+      };
+    }
+
+    const updated: TrustedRuntimeEndpoint = { ...existing, enabled };
+    this.trustedEndpoints.set(endpointId, updated);
+    return {
+      ok: true,
+      code: enabled ? 'ENDPOINT_ENABLED' : 'ENDPOINT_DISABLED',
+      endpoint: { ...updated },
+      policy,
+    };
+  }
+
+  removeTrustedEndpoint(
+    endpointId: string,
+    governance: RuntimeGovernanceContext,
+  ): RuntimeRegistrationResult {
+    const policy = evaluatePolicyWithAudit({
+      actor: governance.actor,
+      action: 'runtime:manage',
+      resource: {
+        id: `runtime:${endpointId}`,
+        type: 'system',
+      },
+      environment: governance.environment,
+      declared_scopes: governance.declared_scopes,
+      approval: governance.approval,
+      system_config: governance.system_config,
+      audit_logger: governance.audit_logger,
+      correlation_id: governance.correlation_id,
+      now: governance.now,
+    });
+
+    if (!policy.allowed) {
+      return {
+        ok: false,
+        code: policy.reason_code,
+        error: policy.reason,
+        policy,
+      };
+    }
+
+    if (!this.trustedEndpoints.has(endpointId)) {
+      return {
+        ok: false,
+        code: 'ENDPOINT_NOT_FOUND',
+        error: `Trusted endpoint "${endpointId}" was not found.`,
+      };
+    }
+
+    this.trustedEndpoints.delete(endpointId);
+    return {
+      ok: true,
+      code: 'ENDPOINT_REMOVED',
+      policy,
+    };
+  }
+
   private resolveAuthHeaders(
     endpoint: TrustedRuntimeEndpoint,
   ): Record<string, string> | undefined {

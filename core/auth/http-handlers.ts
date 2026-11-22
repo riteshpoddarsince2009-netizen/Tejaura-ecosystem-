@@ -14,18 +14,24 @@ export function extractAuthRequestContext(req: Request): AuthRequestContext {
     Boolean((req.socket as { encrypted?: boolean } | undefined)?.encrypted) ||
     req.secure === true;
   const forwardedProto = req.header('x-forwarded-proto');
+  const forwardedHost = req.header('x-forwarded-host');
   const host = req.header('host');
   const userAgent = req.header('user-agent');
   const origin = req.header('origin');
+  const secFetchSite = req.header('sec-fetch-site');
+  const secFetchDest = req.header('sec-fetch-dest');
 
   return {
     protocol: req.protocol,
     encrypted: socketEncrypted,
     host,
     forwardedProto,
+    forwardedHost,
     clientIp: req.ip ?? req.socket?.remoteAddress,
     userAgent,
     origin,
+    secFetchSite,
+    secFetchDest,
     environment:
       process.env.NODE_ENV === 'production' ? 'production' : 'local',
   };
@@ -46,18 +52,25 @@ function validateSameOriginForMutation(req: Request): boolean {
   }
 
   const origin = req.header('origin');
-  const host = req.header('host');
+  const forwardedHost = (req.header('x-forwarded-host') ?? '')
+    .split(',')[0]
+    ?.trim()
+    .toLowerCase();
+  const host = (req.header('host') ?? '').trim().toLowerCase();
   if (!origin) {
     // Non-browser API clients without Origin still require HttpOnly cookie + CSRF-safe headers.
     return true;
   }
-  if (!host) {
+  if (!host && !forwardedHost) {
     return false;
   }
 
   try {
-    const parsedOrigin = new URL(origin);
-    return parsedOrigin.host.toLowerCase() === host.toLowerCase();
+    const parsedOriginHost = new URL(origin).host.toLowerCase();
+    return (
+      (host.length > 0 && parsedOriginHost === host) ||
+      (forwardedHost.length > 0 && parsedOriginHost === forwardedHost)
+    );
   } catch {
     return false;
   }

@@ -7,6 +7,7 @@ interface AuthScreenProps {
   initialized: boolean;
   transportError?: string;
   sessionNotice?: string | null;
+  embeddedFrame?: boolean;
   onAuthenticated: (owner: OwnerSessionInfo) => void;
   onSetupCompleted: () => void;
 }
@@ -17,9 +18,19 @@ export function AuthScreen({
   initialized,
   transportError,
   sessionNotice,
+  embeddedFrame,
   onAuthenticated,
   onSetupCompleted,
 }: AuthScreenProps) {
+  const inIframe =
+    embeddedFrame === true ||
+    (typeof window !== 'undefined' && (() => {
+      try {
+        return window.self !== window.top;
+      } catch {
+        return true;
+      }
+    })());
   const [mode, setMode] = useState<AuthMode>(initialized ? 'login' : 'setup');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +91,26 @@ export function AuthScreen({
         password: loginPassword,
         mfa_code: mfaCode.trim() || undefined,
       });
+
+      const verifyStatus = await controlPlaneApi.getAuthStatus();
+      if (!verifyStatus.authenticated || !verifyStatus.owner) {
+        if (verifyStatus.transport_error) {
+          setError(verifyStatus.transport_error);
+        } else if (verifyStatus.embedded_frame || inIframe) {
+          setError(
+            'Sign-in credentials succeeded, but your browser blocked the HttpOnly session cookie inside this embedded preview iframe. Open this TEJAURA URL directly in its own browser tab to sign in securely.',
+          );
+        } else {
+          setError(
+            'Sign-in credentials succeeded, but the browser did not persist the HttpOnly session cookie. Ensure HTTPS or localhost loopback and enable cookies.',
+          );
+        }
+        return;
+      }
+
       setLoginPassword('');
       setMfaCode('');
-      onAuthenticated(res.owner);
+      onAuthenticated(verifyStatus.owner ?? res.owner);
     } catch (err) {
       if (err instanceof ApiError && err.mfaRequired) {
         setMfaRequired(true);
@@ -164,6 +192,12 @@ export function AuthScreen({
             className="mb-4 rounded-xl border border-amber-500/30 bg-amber-950/25 p-3.5 text-sm text-amber-200"
           >
             {sessionNotice}
+          </div>
+        )}
+
+        {inIframe && !transportError && (
+          <div className="mb-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3.5 text-xs text-cyan-200">
+            Embedded preview mode detected. Partitioned HTTPS session cookies are enabled; if your browser blocks third-party frame cookies, open this URL in a standalone browser tab.
           </div>
         )}
 

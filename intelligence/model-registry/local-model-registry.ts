@@ -44,7 +44,7 @@ export interface HardwareRequirements {
 export interface ModelRepositoryInfo {
   repo_id: string;
   revision: string;
-  source: 'huggingface' | 'local_mirror' | 'owner_archive';
+  source: 'modelscope' | 'huggingface' | 'local_mirror' | 'owner_archive';
 }
 
 export interface ModelLicenseInfo {
@@ -73,6 +73,8 @@ export interface LocalModelEntry {
   enabled: boolean;
   availability: ModelAvailabilityStatus;
   license: ModelLicenseInfo;
+  size_mb?: number;
+  format?: 'safetensors' | 'gguf' | 'airllm-sharded' | 'mlx' | 'onnx' | 'custom';
   node_id?: string;
 }
 
@@ -520,5 +522,42 @@ export class LocalModelRegistry {
     }
     this.models.set(modelId, { ...cloneEntry(existing), availability });
     return true;
+  }
+
+  removeModel(
+    modelId: string,
+    ctx: RegistryMutationContext,
+  ): RegistryMutationResult<{ model_id: string }> {
+    const policy = evaluatePolicyWithAudit({
+      actor: ctx.actor,
+      action: 'model:registry_write',
+      resource: { id: `model:${modelId}`, type: 'model' },
+      environment: 'local',
+      declared_scopes: ctx.declared_scopes,
+      owner_confirmed_l4: true,
+      system_config: ctx.system_config,
+      audit_logger: ctx.audit_logger,
+      correlation_id: ctx.correlation_id,
+    });
+
+    if (!policy.allowed) {
+      return {
+        ok: false,
+        code: policy.reason_code,
+        error: policy.reason,
+        policy,
+      };
+    }
+
+    if (!this.models.has(modelId)) {
+      return {
+        ok: false,
+        code: 'MODEL_NOT_FOUND',
+        error: `Model "${modelId}" is not registered.`,
+      };
+    }
+
+    this.models.delete(modelId);
+    return { ok: true, data: { model_id: modelId } };
   }
 }

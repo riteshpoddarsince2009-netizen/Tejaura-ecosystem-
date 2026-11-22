@@ -112,7 +112,7 @@
             },
             "source": {
               "type": "string",
-              "enum": ["huggingface", "local_mirror", "owner_archive"]
+              "enum": ["modelscope", "huggingface", "local_mirror", "owner_archive"]
             }
           }
         },
@@ -216,6 +216,14 @@
               "maxLength": 512
             }
           }
+        },
+        "size_mb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "format": {
+          "type": "string",
+          "enum": ["safetensors", "gguf", "airllm-sharded", "mlx", "onnx", "custom"]
         },
         "node_id": {
           "type": "string",

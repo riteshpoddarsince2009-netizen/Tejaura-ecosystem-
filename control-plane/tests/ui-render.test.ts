@@ -5,20 +5,26 @@ import { describe, it } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+import { AgentsManagementView } from '../../src/components/AgentsManagementView.tsx';
 import { ApprovalInboxView } from '../../src/components/ApprovalInboxView.tsx';
 import { AuditCenterView } from '../../src/components/AuditCenterView.tsx';
 import { AuthScreen } from '../../src/components/AuthScreen.tsx';
 import { ModelsRuntimesView } from '../../src/components/ModelsRuntimesView.tsx';
 import { OverviewView } from '../../src/components/OverviewView.tsx';
 import { PolicyInspectorView } from '../../src/components/PolicyInspectorView.tsx';
+import { ProjectsManagementView } from '../../src/components/ProjectsManagementView.tsx';
 import { SecuritySettingsView } from '../../src/components/SecuritySettingsView.tsx';
+import { SystemAdminView } from '../../src/components/SystemAdminView.tsx';
 import { TaskCenterView } from '../../src/components/TaskCenterView.tsx';
 import type {
   ApprovalItem,
   AuditLogItem,
   ComputeNodeItem,
+  ManagedAgentItem,
+  ManagedProjectItem,
   ModelInventoryItem,
   OrchestratedTask,
+  SystemAdminOverview,
   SystemOverviewResponse,
 } from '../../src/types/controlPlane.ts';
 
@@ -344,6 +350,110 @@ describe('Stage 3 — Frontend UI Rendering & Secret Non-Exposure Guard', () => 
     assert.match(securityHtml, /Secret Key Inventory \(Presence Metadata Only\)/);
     assert.match(securityHtml, /TEJAURA_AIRLLM_WORKER_TOKEN/);
     assert.match(securityHtml, /Enroll TOTP Factor/);
+
+    const sampleAgent: ManagedAgentItem = {
+      id: 'agent_eng_1',
+      name: 'Engineering Patch Bot',
+      department: 'engineering',
+      role: 'Sandboxed Engineer',
+      description: 'Prepares verified staging patches.',
+      status: 'active',
+      enabled: true,
+      permitted_autonomy_level: 'L2',
+      allowed_tool_ids: ['workspace.read'],
+      preferred_model_ids: [model.model_id],
+      backup_model_ids: [],
+      max_concurrent_jobs: 1,
+      timeout_ms: 30000,
+      allowed_paths: ['sandbox'],
+      network_mode: 'none',
+      last_health_status: 'healthy',
+      created_by: 'owner_primary',
+      created_at: '2026-11-20T12:00:00.000Z',
+      updated_at: '2026-11-20T12:00:00.000Z',
+      schema_version: '1.0.0',
+    };
+    const agentsHtml = renderToStaticMarkup(
+      React.createElement(AgentsManagementView, {
+        models: [model],
+        initialAgents: [sampleAgent],
+      }),
+    );
+    assert.match(agentsHtml, /Agent Management Center/);
+    assert.match(agentsHtml, /Engineering Patch Bot/);
+
+    const sampleProject: ManagedProjectItem = {
+      project_id: 'proj_docs',
+      name: 'TEJAURA Docs Portal',
+      slug: 'tejaura-docs',
+      project_type: 'website',
+      description: 'Official docs site.',
+      domain_url: 'https://staging.tejaura.local',
+      workspace_path: 'projects/tejaura-docs',
+      environment: 'staging',
+      deployment_status: 'draft',
+      health_status: 'unknown',
+      assigned_agent_ids: [sampleAgent.id],
+      recent_changes: [],
+      recent_errors: [],
+      pending_approval_id: null,
+      last_deployed_at: null,
+      created_by: 'owner_primary',
+      created_at: '2026-11-20T12:00:00.000Z',
+      updated_at: '2026-11-20T12:00:00.000Z',
+    };
+    const projectsHtml = renderToStaticMarkup(
+      React.createElement(ProjectsManagementView, {
+        agents: [sampleAgent],
+        initialProjects: [sampleProject],
+      }),
+    );
+    assert.match(projectsHtml, /Projects &amp; Websites/);
+    assert.match(projectsHtml, /TEJAURA Docs Portal/);
+
+    const sampleAdmin: SystemAdminOverview = {
+      generated_at: '2026-11-20T12:00:00.000Z',
+      database: {
+        engine: 'sqlite',
+        integrity_ok: true,
+        integrity_message: 'ok',
+        page_count: 16,
+        page_size: 4096,
+        estimated_bytes: 65536,
+        table_counts: { tasks: 4, managed_agents: 1 },
+      },
+      migrations: overview.persistence.migrations_applied,
+      storage: {
+        state_dir_bytes: 131072,
+        backups_dir_bytes: 0,
+        db_estimated_bytes: 65536,
+      },
+      queue_health: {
+        queued_tasks: 1,
+        queued_agent_jobs: 0,
+        active_leases: 0,
+        recent_failed_tasks: 0,
+        recent_failed_jobs: 0,
+      },
+      workers_summary: { total: 1, enabled: 1, online: 0, offline: 1 },
+      config: {
+        maintenance_mode: false,
+        max_queue_depth: 20,
+        auto_recover_leases: true,
+        preferred_model_source: 'modelscope',
+        default_model_id: model.model_id,
+        backup_model_id: null,
+      },
+      backups: [],
+    };
+    const adminHtml = renderToStaticMarkup(
+      React.createElement(SystemAdminView, {
+        initialAdmin: sampleAdmin,
+        initialLogs: [],
+      }),
+    );
+    assert.match(adminHtml, /System Administration/);
+    assert.match(adminHtml, /PASS \(ok\)/);
   });
 
   it('guarantees frontend source never persists secrets in localStorage or embeds server master/worker secrets', () => {

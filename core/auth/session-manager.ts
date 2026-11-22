@@ -10,6 +10,10 @@ import type {
   TejauraRole,
 } from '../security/index.ts';
 
+import type { SessionTransportMode } from './auth-types.ts';
+
+export const DEV_LOOPBACK_COOKIE_NAME = 'tejaura_dev_session';
+
 export interface SessionMetadataPayload {
   client_ip?: string;
   user_agent?: string;
@@ -19,12 +23,52 @@ export interface IssuedSession {
   rawToken: string;
   record: StoredSessionRecord;
   setCookieHeader: string;
+  transportMode: SessionTransportMode;
+}
+
+export function resolveSessionTransportMode(params: {
+  protocol?: 'https' | 'http-loopback-dev';
+  secFetchSite?: string;
+  secFetchDest?: string;
+}): SessionTransportMode {
+  if (params.protocol === 'http-loopback-dev') {
+    return 'http_loopback_dev';
+  }
+  const site = (params.secFetchSite ?? '').trim().toLowerCase();
+  const dest = (params.secFetchDest ?? '').trim().toLowerCase();
+  if (dest === 'iframe' || site === 'cross-site') {
+    return 'https_embedded_iframe';
+  }
+  return 'https_direct';
 }
 
 export function buildSessionSetCookieHeader(
   rawToken: string,
   sessionPolicy: SecurityConfig['session'],
+  transportMode: SessionTransportMode = 'https_direct',
 ): string {
+  if (transportMode === 'http_loopback_dev') {
+    return [
+      `${DEV_LOOPBACK_COOKIE_NAME}=${encodeURIComponent(rawToken)}`,
+      `Path=${sessionPolicy.path}`,
+      `Max-Age=${sessionPolicy.ttlSeconds}`,
+      'SameSite=Lax',
+      'HttpOnly',
+    ].join('; ');
+  }
+
+  if (transportMode === 'https_embedded_iframe') {
+    return [
+      `${sessionPolicy.cookieName}=${encodeURIComponent(rawToken)}`,
+      `Path=${sessionPolicy.path}`,
+      `Max-Age=${sessionPolicy.ttlSeconds}`,
+      'SameSite=None',
+      'HttpOnly',
+      'Secure',
+      'Partitioned',
+    ].join('; ');
+  }
+
   const sameSite = sessionPolicy.sameSite === 'strict' ? 'Strict' : 'Lax';
   // Enforce HttpOnly, Secure, SameSite, Path=/, Max-Age
   return [
@@ -39,7 +83,32 @@ export function buildSessionSetCookieHeader(
 
 export function buildClearSessionCookieHeader(
   sessionPolicy: SecurityConfig['session'],
+  transportMode: SessionTransportMode = 'https_direct',
 ): string {
+  if (transportMode === 'http_loopback_dev') {
+    return [
+      `${DEV_LOOPBACK_COOKIE_NAME}=`,
+      `Path=${sessionPolicy.path}`,
+      'Max-Age=0',
+      'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      'SameSite=Lax',
+      'HttpOnly',
+    ].join('; ');
+  }
+
+  if (transportMode === 'https_embedded_iframe') {
+    return [
+      `${sessionPolicy.cookieName}=`,
+      `Path=${sessionPolicy.path}`,
+      'Max-Age=0',
+      'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      'SameSite=None',
+      'HttpOnly',
+      'Secure',
+      'Partitioned',
+    ].join('; ');
+  }
+
   const sameSite = sessionPolicy.sameSite === 'strict' ? 'Strict' : 'Lax';
   return [
     `${sessionPolicy.cookieName}=`,
@@ -55,26 +124,37 @@ export function buildClearSessionCookieHeader(
 export function parseSessionTokenFromCookieHeader(
   cookieHeader: string | undefined,
   cookieName: string,
+  allowDevLoopbackFallback = false,
 ): string | null {
   if (typeof cookieHeader !== 'string' || cookieHeader.trim().length === 0) {
     return null;
   }
 
   const pairs = cookieHeader.split(';');
+  let devToken: string | null = null;
+
   for (const part of pairs) {
     const eqIndex = part.indexOf('=');
     if (eqIndex <= 0) continue;
     const name = part.slice(0, eqIndex).trim();
-    if (name !== cookieName) continue;
     const rawVal = part.slice(eqIndex + 1).trim();
-    if (!rawVal) return null;
-    try {
-      return decodeURIComponent(rawVal);
-    } catch {
-      return null;
+    if (!rawVal) continue;
+    if (name === cookieName) {
+      try {
+        return decodeURIComponent(rawVal);
+      } catch {
+        return null;
+      }
+    }
+    if (allowDevLoopbackFallback && name === DEV_LOOPBACK_COOKIE_NAME && !devToken) {
+      try {
+        devToken = decodeURIComponent(rawVal);
+      } catch {
+        devToken = null;
+      }
     }
   }
-  return null;
+  return devToken;
 }
 
 export class SessionManager {
@@ -97,6 +177,7 @@ export class SessionManager {
     role: TejauraRole;
     existingSessions: StoredSessionRecord[];
     metadata?: SessionMetadataPayload;
+    transportMode?: SessionTransportMode;
   }): { issued: IssuedSession; updatedSessions: StoredSessionRecord[] } {
     const now = this.clock();
     const nowMs = now.getTime();
@@ -158,11 +239,17 @@ export class SessionManager {
 
     const updatedSessions = [...revoked, ...trimmedActive, newRecord];
 
+    const transportMode = params.transportMode ?? 'https_direct';
     return {
       issued: {
         rawToken,
         record: newRecord,
-        setCookieHeader: buildSessionSetCookieHeader(rawToken, this.policy),
+        setCookieHeader: buildSessionSetCookieHeader(
+          rawToken,
+          this.policy,
+          transportMode,
+        ),
+        transportMode,
       },
       updatedSessions,
     };
@@ -336,6 +423,37 @@ export class SessionManager {
 
     const updatedSessions = sessions.map((s) => {
       if (s.actor_id === actorId && s.revoked_at === null) {
+        revokedCount += 1;
+        return {
+          ...s,
+          revoked_at: nowIso,
+          revocation_reason: reason,
+        };
+      }
+      return s;
+    });
+
+    return { revokedCount, updatedSessions };
+  }
+
+  revokeOtherSessionsForActor(
+    actorId: string,
+    keepSessionId: string,
+    sessions: StoredSessionRecord[],
+    reason: string,
+  ): {
+    revokedCount: number;
+    updatedSessions: StoredSessionRecord[];
+  } {
+    const nowIso = this.clock().toISOString();
+    let revokedCount = 0;
+
+    const updatedSessions = sessions.map((s) => {
+      if (
+        s.actor_id === actorId &&
+        s.session_id !== keepSessionId &&
+        s.revoked_at === null
+      ) {
         revokedCount += 1;
         return {
           ...s,

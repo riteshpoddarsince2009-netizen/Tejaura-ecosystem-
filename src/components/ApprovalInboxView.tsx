@@ -112,7 +112,8 @@ export function ApprovalInboxView({
                           onClick={() => onSelectTask(item.task_id)}
                           className="text-xs text-cyan-400 hover:text-cyan-300 font-mono self-start"
                         >
-                          Task {item.task_id.slice(0, 14)}…
+                          {item.task_id.startsWith('proj_') ? 'Project ' : 'Task '}
+                          {item.task_id.slice(0, 14)}…
                         </button>
                       </div>
 

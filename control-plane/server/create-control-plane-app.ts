@@ -70,6 +70,7 @@ import {
   AgentExecutionEngine,
   MockSandboxAdapter,
 } from '../../execution/index.ts';
+import { ManagementService } from '../management/index.ts';
 import {
   TaskOrchestrator,
   type ExternalTaskActionHandler,
@@ -111,6 +112,7 @@ export interface ControlPlaneAppBundle {
   router: ModelRouter;
   orchestrator: TaskOrchestrator;
   executionEngine: AgentExecutionEngine;
+  management: ManagementService;
   close: () => void;
 }
 
@@ -374,6 +376,20 @@ export function createControlPlaneApp(
   });
   executionEngine.recoverOnStartup();
 
+  const management = new ManagementService({
+    store,
+    registry,
+    hardware,
+    runtime,
+    auditLogger,
+    auditStorage,
+    approvalsProvider: () => orchestrator.getApprovalService(),
+    systemConfig,
+    stateDir,
+    clock,
+  });
+  management.syncFromPersistenceOnStartup();
+
   const app = express();
   app.disable('x-powered-by');
   if (securityConfig.transport.trustProxyProtoHeader) {
@@ -480,16 +496,24 @@ export function createControlPlaneApp(
       return;
     }
 
-    const hostHeader = normalizeHostPort(
-      req.get('x-forwarded-host') ?? req.get('host'),
-    );
+    const candidateHosts = new Set<string>();
+    const rawFwdHost = req.get('x-forwarded-host');
+    if (rawFwdHost) {
+      for (const part of rawFwdHost.split(',')) {
+        const normalized = normalizeHostPort(part);
+        if (normalized) candidateHosts.add(normalized);
+      }
+    }
+    const rawHost = normalizeHostPort(req.get('host'));
+    if (rawHost) candidateHosts.add(rawHost);
+
     const originHeader = req.get('origin');
     const refererHeader = req.get('referer');
 
     if (originHeader) {
       try {
         const parsedOrigin = new URL(originHeader);
-        if (normalizeHostPort(parsedOrigin.host) !== hostHeader) {
+        if (!candidateHosts.has(normalizeHostPort(parsedOrigin.host))) {
           res.status(403).json({
             ok: false,
             code: 'CSRF_ORIGIN_MISMATCH',
@@ -508,7 +532,7 @@ export function createControlPlaneApp(
     } else if (refererHeader) {
       try {
         const parsedRef = new URL(refererHeader);
-        if (normalizeHostPort(parsedRef.host) !== hostHeader) {
+        if (!candidateHosts.has(normalizeHostPort(parsedRef.host))) {
           res.status(403).json({
             ok: false,
             code: 'CSRF_REFERER_MISMATCH',
@@ -536,7 +560,10 @@ export function createControlPlaneApp(
         (req.socket as { encrypted?: boolean } | undefined)?.encrypted,
       ),
       host: req.get('host'),
+      forwardedHost: req.get('x-forwarded-host'),
       forwardedProto: req.get('x-forwarded-proto'),
+      secFetchSite: req.get('sec-fetch-site'),
+      secFetchDest: req.get('sec-fetch-dest'),
       clientIp: req.ip || req.socket.remoteAddress,
       userAgent: req.get('user-agent'),
       origin: req.get('origin'),
@@ -597,6 +624,9 @@ export function createControlPlaneApp(
 
   app.get('/api/auth/status', (req: Request, res: Response) => {
     const initialized = auth.isOwnerInitialized();
+    const embeddedFrame =
+      (req.get('sec-fetch-dest') ?? '').toLowerCase() === 'iframe' ||
+      (req.get('sec-fetch-site') ?? '').toLowerCase() === 'cross-site';
     const authRes = auth.authenticateSessionFromCookieHeader(
       req.headers.cookie,
       buildAuthContext(req),
@@ -606,6 +636,7 @@ export function createControlPlaneApp(
         ok: true,
         initialized,
         authenticated: false,
+        embedded_frame: embeddedFrame,
         transport_error:
           authRes.code === 'HTTPS_REQUIRED' ? authRes.error : undefined,
       });
@@ -616,6 +647,7 @@ export function createControlPlaneApp(
       ok: true,
       initialized: true,
       authenticated: true,
+      embedded_frame: embeddedFrame,
       owner: {
         owner_id: authRes.session.owner_id,
         username: authRes.session.username,
@@ -733,6 +765,7 @@ export function createControlPlaneApp(
     res.setHeader('Set-Cookie', result.set_cookie_header);
     res.json({
       ok: true,
+      transport_mode: result.transport_mode,
       owner: {
         owner_id: result.session.owner_id,
         username: result.session.username,
@@ -748,8 +781,9 @@ export function createControlPlaneApp(
     const out = auth.logout({
       cookieHeader: req.headers.cookie,
       correlation_id: req.tejauraCorrelationId ?? 'corr_logout',
+      request: buildAuthContext(req),
     });
-    res.setHeader('Set-Cookie', out.clear_cookie_header);
+    res.setHeader('Set-Cookie', out.clear_cookie_headers);
     res.json({ ok: true });
   });
 
@@ -836,6 +870,265 @@ export function createControlPlaneApp(
       }
       res.setHeader('Set-Cookie', result.clear_cookie_header);
       res.json({ ok: true, revoked_count: result.revoked_count });
+    },
+  );
+
+  app.get(
+    '/api/auth/profile',
+    requireOwnerAuth('auth:admin'),
+    (req: AuthedRequest, res: Response) => {
+      const result = auth.getOwnerProfile({
+        principal: req.tejauraSession!.toPrincipal(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_profile_get',
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.patch(
+    '/api/auth/profile',
+    requireOwnerAuth('auth:admin'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_BODY',
+          error: 'Profile payload must be a JSON object.',
+        });
+        return;
+      }
+      const result = auth.updateOwnerProfile({
+        principal: req.tejauraSession!.toPrincipal(),
+        display_name:
+          typeof req.body.display_name === 'string'
+            ? req.body.display_name
+            : undefined,
+        email: typeof req.body.email === 'string' ? req.body.email : undefined,
+        timezone:
+          typeof req.body.timezone === 'string' ? req.body.timezone : undefined,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_profile_update',
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.post(
+    '/api/auth/password',
+    requireOwnerAuth('auth:admin'),
+    async (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_BODY',
+          error: 'Password update payload must be a JSON object.',
+        });
+        return;
+      }
+      const currentPassword =
+        typeof req.body.current_password === 'string' ? req.body.current_password : '';
+      const newPassword =
+        typeof req.body.new_password === 'string' ? req.body.new_password : '';
+      if (!currentPassword || !newPassword) {
+        res.status(400).json({
+          ok: false,
+          code: 'MISSING_PASSWORD_FIELDS',
+          error: 'current_password and new_password are required.',
+        });
+        return;
+      }
+
+      const result = await auth.changePassword({
+        principal: req.tejauraSession!.toPrincipal(),
+        current_password: currentPassword,
+        new_password: newPassword,
+        keep_session_id: req.tejauraSession!.session_id,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_pw_change',
+      });
+      if (!result.ok) {
+        res.status(result.code === 'INVALID_CURRENT_PASSWORD' ? 401 : 400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.get(
+    '/api/auth/sessions',
+    requireOwnerAuth('auth:admin'),
+    (req: AuthedRequest, res: Response) => {
+      const includeRevoked = req.query.include_revoked === 'true';
+      const result = auth.listSessions({
+        principal: req.tejauraSession!.toPrincipal(),
+        current_session_id: req.tejauraSession!.session_id,
+        include_revoked: includeRevoked,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_sessions_list',
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.post(
+    '/api/auth/sessions/revoke-others',
+    requireOwnerAuth('auth:admin'),
+    (req: AuthedRequest, res: Response) => {
+      const result = auth.revokeOtherSessions({
+        principal: req.tejauraSession!.toPrincipal(),
+        keep_session_id: req.tejauraSession!.session_id,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_revoke_others',
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.post(
+    '/api/auth/sessions/:id/revoke',
+    requireOwnerAuth('auth:admin'),
+    (req: AuthedRequest, res: Response) => {
+      const targetId = sanitizeString(req.params.id, 3, 128);
+      if (!targetId) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_SESSION_ID',
+          error: 'Valid target session ID is required.',
+        });
+        return;
+      }
+      const result = auth.revokeSession({
+        principal: req.tejauraSession!.toPrincipal(),
+        target_session_id: targetId,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_revoke_one',
+      });
+      if (!result.ok) {
+        res.status(result.code === 'SESSION_NOT_FOUND_OR_REVOKED' ? 404 : 400).json(result);
+        return;
+      }
+      res.json({
+        ok: true,
+        revoked_current: targetId === req.tejauraSession!.session_id,
+      });
+    },
+  );
+
+  app.get(
+    '/api/auth/mfa',
+    requireOwnerAuth('auth:admin'),
+    (req: AuthedRequest, res: Response) => {
+      const result = auth.listMfaFactors({
+        principal: req.tejauraSession!.toPrincipal(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_mfa_list',
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.post(
+    '/api/auth/mfa/:id/toggle',
+    requireOwnerAuth('auth:admin'),
+    async (req: AuthedRequest, res: Response) => {
+      const factorId = sanitizeString(req.params.id, 3, 64);
+      if (
+        !factorId ||
+        !isPlainObject(req.body) ||
+        typeof req.body.enabled !== 'boolean' ||
+        typeof req.body.current_password !== 'string'
+      ) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_MFA_TOGGLE',
+          error: 'factor_id, boolean enabled, and current_password are required.',
+        });
+        return;
+      }
+      const result = await auth.toggleMfaFactor({
+        principal: req.tejauraSession!.toPrincipal(),
+        factor_id: factorId,
+        enabled: req.body.enabled,
+        current_password: req.body.current_password,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_mfa_toggle',
+      });
+      if (!result.ok) {
+        res.status(result.code === 'INVALID_CURRENT_PASSWORD' ? 401 : 400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.delete(
+    '/api/auth/mfa/:id',
+    requireOwnerAuth('auth:admin'),
+    async (req: AuthedRequest, res: Response) => {
+      const factorId = sanitizeString(req.params.id, 3, 64);
+      const currentPassword = isPlainObject(req.body) && typeof req.body.current_password === 'string'
+        ? req.body.current_password
+        : '';
+      if (!factorId || !currentPassword) {
+        res.status(400).json({
+          ok: false,
+          code: 'MISSING_MFA_DELETE_FIELDS',
+          error: 'factor_id and current_password are required.',
+        });
+        return;
+      }
+      const result = await auth.removeMfaFactor({
+        principal: req.tejauraSession!.toPrincipal(),
+        factor_id: factorId,
+        current_password: currentPassword,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_mfa_delete',
+      });
+      if (!result.ok) {
+        res.status(result.code === 'INVALID_CURRENT_PASSWORD' ? 401 : 400).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.post(
+    '/api/auth/recovery-codes/regenerate',
+    requireOwnerAuth('auth:admin'),
+    async (req: AuthedRequest, res: Response) => {
+      const currentPassword = isPlainObject(req.body) && typeof req.body.current_password === 'string'
+        ? req.body.current_password
+        : '';
+      if (!currentPassword) {
+        res.status(400).json({
+          ok: false,
+          code: 'CURRENT_PASSWORD_REQUIRED',
+          error: 'Current password is required to regenerate recovery codes.',
+        });
+        return;
+      }
+      const result = await auth.regenerateRecoveryCodes({
+        principal: req.tejauraSession!.toPrincipal(),
+        current_password: currentPassword,
+        correlation_id: req.tejauraCorrelationId ?? 'corr_recovery_regen',
+      });
+      if (!result.ok) {
+        res.status(result.code === 'INVALID_CURRENT_PASSWORD' ? 401 : 400).json(result);
+        return;
+      }
+      res.json(result);
     },
   );
 
@@ -1368,6 +1661,32 @@ export function createControlPlaneApp(
         return;
       }
 
+      const existingApr = orchestrator.getApprovalService().getApproval(approvalId);
+      if (existingApr && existingApr.task_id.startsWith('proj_')) {
+        const projRes = management.decideProjectApproval({
+          approval_id: approvalId,
+          decision,
+          reviewer: req.tejauraSession!.toTrustedReviewerContext(),
+          reason,
+          correlation_id: req.tejauraCorrelationId ?? 'corr_approval_decide',
+        });
+        if (!projRes.ok) {
+          res.status(projRes.http_status).json({
+            ok: false,
+            code: projRes.code,
+            error: projRes.error,
+          });
+          return;
+        }
+        res.json({
+          ok: true,
+          approval: projRes.data.approval,
+          project: projRes.data.project,
+          task: null,
+        });
+        return;
+      }
+
       const result = orchestrator.decideApprovalAndResumeTask({
         approval_id: approvalId,
         decision,
@@ -1395,16 +1714,30 @@ export function createControlPlaneApp(
   app.get(
     '/api/models',
     requireOwnerAuth('governance:read'),
-    (_req: Request, res: Response) => {
-      const models = registry.listModels().map((model) => ({
+    (req: Request, res: Response) => {
+      const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 100;
+      const rawOffset = typeof req.query.offset === 'string' ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(rawLimit) ? Math.min(250, Math.max(1, Math.round(rawLimit))) : 100;
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const runtimeFilter = typeof req.query.runtime === 'string' ? req.query.runtime.trim() : undefined;
+
+      const paged = management.listManagedModels({
+        runtimeType: runtimeFilter || undefined,
+        limit,
+        offset,
+      });
+      const models = paged.items.map((model) => ({
         ...model,
         breaker: lifecycle.getBreakerState(model.model_id),
-        best_node_fit: hardware.findBestCompatibleNode(model).fit,
       }));
+
       res.json({
         ok: true,
         primary_runtime: PRIMARY_LOCAL_RUNTIME,
         models,
+        total: paged.total,
+        limit,
+        offset,
         compute_nodes: hardware.listNodes(),
         trusted_endpoints: runtime.listTrustedEndpoints().map((ep) => ({
           endpoint_id: ep.endpoint_id,
@@ -1417,6 +1750,136 @@ export function createControlPlaneApp(
         })),
         lifecycle_stats: lifecycle.getStats(),
       });
+    },
+  );
+
+  app.post(
+    '/api/models',
+    requireOwnerAuth('model:registry:write'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_BODY', error: 'Model payload must be a JSON object.' });
+        return;
+      }
+      const outcome = management.addOrUpdateModel(req.body, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_model_create',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.status(201).json({ ok: true, model: outcome.data });
+    },
+  );
+
+  app.patch(
+    '/api/models/:id',
+    requireOwnerAuth('model:registry:write'),
+    (req: AuthedRequest, res: Response) => {
+      const modelId = sanitizeString(req.params.id, 2, 128);
+      if (!modelId || !isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_MODEL_UPDATE', error: 'Valid model ID and JSON body required.' });
+        return;
+      }
+      const outcome = management.addOrUpdateModel(
+        req.body,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_model_update',
+        },
+        modelId,
+      );
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, model: outcome.data });
+    },
+  );
+
+  app.delete(
+    '/api/models/:id',
+    requireOwnerAuth('model:registry:write'),
+    (req: AuthedRequest, res: Response) => {
+      const modelId = sanitizeString(req.params.id, 2, 128);
+      if (!modelId) {
+        res.status(400).json({ ok: false, code: 'INVALID_MODEL_ID', error: 'Invalid model ID.' });
+        return;
+      }
+      const outcome = management.deleteModel(modelId, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_model_delete',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, ...outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/models/:id/toggle',
+    requireOwnerAuth('model:registry:write'),
+    (req: AuthedRequest, res: Response) => {
+      const modelId = sanitizeString(req.params.id, 2, 128);
+      if (!modelId || !isPlainObject(req.body) || typeof req.body.enabled !== 'boolean') {
+        res.status(400).json({ ok: false, code: 'INVALID_MODEL_TOGGLE', error: 'Model ID and boolean enabled flag required.' });
+        return;
+      }
+      const outcome = management.toggleModel(modelId, req.body.enabled, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_model_toggle',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, model: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/models/:id/role',
+    requireOwnerAuth('model:registry:write'),
+    (req: AuthedRequest, res: Response) => {
+      const modelId = sanitizeString(req.params.id, 2, 128);
+      const role = isPlainObject(req.body) ? req.body.role : null;
+      if (!modelId || (role !== 'default' && role !== 'backup')) {
+        res.status(400).json({ ok: false, code: 'INVALID_MODEL_ROLE', error: 'Model ID and role ("default" | "backup") required.' });
+        return;
+      }
+      const outcome = management.setModelRole(modelId, role, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_model_role',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, model: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/models/:id/verify-install',
+    requireOwnerAuth('model:registry:write'),
+    async (req: AuthedRequest, res: Response) => {
+      const modelId = sanitizeString(req.params.id, 2, 128);
+      if (!modelId) {
+        res.status(400).json({ ok: false, code: 'INVALID_MODEL_ID', error: 'Invalid model ID.' });
+        return;
+      }
+      const outcome = await management.verifyModelInstall(modelId, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_model_verify',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, model: outcome.data });
     },
   );
 
@@ -1647,6 +2110,484 @@ export function createControlPlaneApp(
     },
   );
 
+  // -------------------- Stage 4.5 Owner Management Center Routes --------------------
+
+  app.get(
+    '/api/agents',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const department =
+        typeof req.query.department === 'string' ? req.query.department.trim() : undefined;
+      const status =
+        typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
+      const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 50;
+      const rawOffset = typeof req.query.offset === 'string' ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(rawLimit) ? Math.min(250, Math.max(1, Math.round(rawLimit))) : 50;
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const paged = management.listAgents({ department, status, limit, offset });
+      res.json({
+        ok: true,
+        agents: paged.items,
+        total: paged.total,
+        limit,
+        offset,
+      });
+    },
+  );
+
+  app.post(
+    '/api/agents',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_BODY', error: 'Agent payload must be a JSON object.' });
+        return;
+      }
+      const outcome = management.createOrUpdateAgent(req.body, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_agent_create',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.status(201).json({ ok: true, agent: outcome.data });
+    },
+  );
+
+  app.patch(
+    '/api/agents/:id',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const agentId = sanitizeString(req.params.id, 2, 128);
+      if (!agentId || !isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_AGENT_UPDATE', error: 'Valid agent ID and JSON body required.' });
+        return;
+      }
+      const outcome = management.createOrUpdateAgent(
+        req.body,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_agent_update',
+        },
+        agentId,
+      );
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, agent: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/agents/:id/status',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const agentId = sanitizeString(req.params.id, 2, 128);
+      if (
+        !agentId ||
+        !isPlainObject(req.body) ||
+        typeof req.body.status !== 'string'
+      ) {
+        res.status(400).json({ ok: false, code: 'INVALID_AGENT_STATUS', error: 'Agent ID and status required.' });
+        return;
+      }
+      const enabled = typeof req.body.enabled === 'boolean' ? req.body.enabled : req.body.status === 'active';
+      const outcome = management.setAgentStatus(
+        agentId,
+        req.body.status as Parameters<ManagementService['setAgentStatus']>[1],
+        enabled,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_agent_status',
+        },
+      );
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, agent: outcome.data });
+    },
+  );
+
+  app.get(
+    '/api/agents/:id/history',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const agentId = sanitizeString(req.params.id, 2, 128);
+      if (!agentId) {
+        res.status(400).json({ ok: false, code: 'INVALID_AGENT_ID', error: 'Invalid agent ID.' });
+        return;
+      }
+      const outcome = management.getAgentHistory(agentId);
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, ...outcome.data });
+    },
+  );
+
+  app.get(
+    '/api/workers',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 50;
+      const rawOffset = typeof req.query.offset === 'string' ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(rawLimit) ? Math.min(250, Math.max(1, Math.round(rawLimit))) : 50;
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const paged = management.listWorkers(limit, offset);
+      res.json({
+        ok: true,
+        workers: paged.items,
+        total: paged.total,
+        limit,
+        offset,
+      });
+    },
+  );
+
+  app.post(
+    '/api/workers',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_BODY', error: 'Worker payload must be a JSON object.' });
+        return;
+      }
+      const outcome = management.registerOrUpdateWorker(req.body, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_create',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.status(201).json({ ok: true, worker: outcome.data });
+    },
+  );
+
+  app.patch(
+    '/api/workers/:id',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const workerId = sanitizeString(req.params.id, 2, 128);
+      if (!workerId || !isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_WORKER_UPDATE', error: 'Worker ID and JSON body required.' });
+        return;
+      }
+      const outcome = management.registerOrUpdateWorker(
+        req.body,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_worker_update',
+        },
+        workerId,
+      );
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, worker: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/workers/:id/toggle',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const workerId = sanitizeString(req.params.id, 2, 128);
+      if (!workerId || !isPlainObject(req.body) || typeof req.body.enabled !== 'boolean') {
+        res.status(400).json({ ok: false, code: 'INVALID_WORKER_TOGGLE', error: 'Worker ID and boolean enabled flag required.' });
+        return;
+      }
+      const outcome = management.toggleWorker(workerId, req.body.enabled, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_toggle',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, worker: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/workers/:id/probe',
+    requireOwnerAuth('model:discover:local'),
+    async (req: AuthedRequest, res: Response) => {
+      const workerId = sanitizeString(req.params.id, 2, 128);
+      if (!workerId) {
+        res.status(400).json({ ok: false, code: 'INVALID_WORKER_ID', error: 'Invalid worker ID.' });
+        return;
+      }
+      const outcome = await management.probeWorker(workerId, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_probe',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, worker: outcome.data });
+    },
+  );
+
+  app.delete(
+    '/api/workers/:id',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const workerId = sanitizeString(req.params.id, 2, 128);
+      if (!workerId) {
+        res.status(400).json({ ok: false, code: 'INVALID_WORKER_ID', error: 'Invalid worker ID.' });
+        return;
+      }
+      const outcome = management.deleteWorker(workerId, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_worker_delete',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, ...outcome.data });
+    },
+  );
+
+  app.get(
+    '/api/projects',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const environment =
+        typeof req.query.environment === 'string' ? req.query.environment.trim() : undefined;
+      const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 50;
+      const rawOffset = typeof req.query.offset === 'string' ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(rawLimit) ? Math.min(250, Math.max(1, Math.round(rawLimit))) : 50;
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const paged = management.listProjects({ environment, limit, offset });
+      res.json({
+        ok: true,
+        projects: paged.items,
+        total: paged.total,
+        limit,
+        offset,
+      });
+    },
+  );
+
+  app.post(
+    '/api/projects',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_BODY', error: 'Project payload must be a JSON object.' });
+        return;
+      }
+      const outcome = management.createOrUpdateProject(req.body, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_proj_create',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.status(201).json({ ok: true, project: outcome.data });
+    },
+  );
+
+  app.patch(
+    '/api/projects/:id',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const projectId = sanitizeString(req.params.id, 2, 128);
+      if (!projectId || !isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_PROJECT_UPDATE', error: 'Project ID and JSON body required.' });
+        return;
+      }
+      const outcome = management.createOrUpdateProject(
+        req.body,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_proj_update',
+        },
+        projectId,
+      );
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, project: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/projects/:id/deploy',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const projectId = sanitizeString(req.params.id, 2, 128);
+      if (!projectId) {
+        res.status(400).json({ ok: false, code: 'INVALID_PROJECT_ID', error: 'Invalid project ID.' });
+        return;
+      }
+      const bodyObj = isPlainObject(req.body) ? req.body : {};
+      const outcome = management.deployProject(
+        projectId,
+        {
+          target_environment:
+            typeof bodyObj.target_environment === 'string'
+              ? (bodyObj.target_environment as ExecutionEnvironment)
+              : undefined,
+          notes: typeof bodyObj.notes === 'string' ? bodyObj.notes : undefined,
+          approval_id:
+            typeof bodyObj.approval_id === 'string' ? bodyObj.approval_id : undefined,
+          owner_confirmed_l4: bodyObj.owner_confirmed_l4 === true,
+        },
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_proj_deploy',
+        },
+      );
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, ...outcome.data });
+    },
+  );
+
+  app.delete(
+    '/api/projects/:id',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const projectId = sanitizeString(req.params.id, 2, 128);
+      if (!projectId) {
+        res.status(400).json({ ok: false, code: 'INVALID_PROJECT_ID', error: 'Invalid project ID.' });
+        return;
+      }
+      const outcome = management.deleteProject(projectId, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_proj_delete',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, ...outcome.data });
+    },
+  );
+
+  app.get(
+    '/api/system/admin',
+    requireOwnerAuth('governance:read'),
+    (_req: Request, res: Response) => {
+      res.json({
+        ok: true,
+        admin: management.getSystemAdminOverview(),
+      });
+    },
+  );
+
+  app.patch(
+    '/api/system/config',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({ ok: false, code: 'INVALID_BODY', error: 'System configuration payload must be a JSON object.' });
+        return;
+      }
+      const outcome = management.updateRuntimeSystemConfig(req.body, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_sys_cfg',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, config: outcome.data });
+    },
+  );
+
+  app.get(
+    '/api/system/logs',
+    requireOwnerAuth('audit:read'),
+    (req: Request, res: Response) => {
+      const source =
+        req.query.source === 'audit' ||
+        req.query.source === 'task_event' ||
+        req.query.source === 'agent_execution'
+          ? req.query.source
+          : 'all';
+      const severity =
+        req.query.severity === 'info' ||
+        req.query.severity === 'warn' ||
+        req.query.severity === 'error'
+          ? req.query.severity
+          : 'all';
+      const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 40;
+      const rawOffset = typeof req.query.offset === 'string' ? Number(req.query.offset) : 0;
+      const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.round(rawLimit))) : 40;
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const logs = management.querySystemLogs({ source, severity, limit, offset });
+      res.json({
+        ok: true,
+        logs: logs.items,
+        total: logs.total,
+        limit,
+        offset,
+      });
+    },
+  );
+
+  app.get(
+    '/api/system/backups',
+    requireOwnerAuth('governance:read'),
+    (_req: Request, res: Response) => {
+      res.json({
+        ok: true,
+        backups: store.listSystemBackups(25),
+      });
+    },
+  );
+
+  app.post(
+    '/api/system/backups',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const outcome = management.createSystemBackup({
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_backup_create',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.status(201).json({ ok: true, backup: outcome.data });
+    },
+  );
+
+  app.post(
+    '/api/system/backups/:id/restore',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const backupId = sanitizeString(req.params.id, 3, 128);
+      if (!backupId) {
+        res.status(400).json({ ok: false, code: 'INVALID_BACKUP_ID', error: 'Invalid backup ID.' });
+        return;
+      }
+      const outcome = management.restoreSystemBackup(backupId, {
+        actor: req.tejauraSession!.toPolicyActor(),
+        correlation_id: req.tejauraCorrelationId ?? 'corr_backup_restore',
+      });
+      if (!outcome.ok) {
+        res.status(outcome.http_status).json({ ok: false, code: outcome.code, error: outcome.error });
+        return;
+      }
+      res.json({ ok: true, backup: outcome.data });
+    },
+  );
+
   // Any unmatched /api route fails closed with JSON 404.
   app.use('/api', (_req: Request, res: Response) => {
     res.status(404).json({
@@ -1669,6 +2610,7 @@ export function createControlPlaneApp(
     router,
     orchestrator,
     executionEngine,
+    management,
     close: () => {
       orchestrator.stopWorkerLoop();
       store.close();

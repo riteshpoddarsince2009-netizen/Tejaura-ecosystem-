@@ -1,30 +1,37 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
+  Bot,
   CalendarClock,
   CheckSquare,
   Cpu,
   FileText,
+  FolderGit2,
   ListTodo,
   Lock,
   LogOut,
+  ServerCog,
   Shield,
   ShieldCheck,
 } from 'lucide-react';
 import { ApiError, controlPlaneApi } from './api/client.ts';
+import { AgentsManagementView } from './components/AgentsManagementView.tsx';
 import { ApprovalInboxView } from './components/ApprovalInboxView.tsx';
 import { AuditCenterView } from './components/AuditCenterView.tsx';
 import { AuthScreen } from './components/AuthScreen.tsx';
 import { ModelsRuntimesView } from './components/ModelsRuntimesView.tsx';
 import { OverviewView } from './components/OverviewView.tsx';
 import { PolicyInspectorView } from './components/PolicyInspectorView.tsx';
+import { ProjectsManagementView } from './components/ProjectsManagementView.tsx';
 import { SchedulesView } from './components/SchedulesView.tsx';
 import { SecuritySettingsView } from './components/SecuritySettingsView.tsx';
+import { SystemAdminView } from './components/SystemAdminView.tsx';
 import { TaskCenterView } from './components/TaskCenterView.tsx';
 import type {
   ApprovalItem,
   AuditLogItem,
   ComputeNodeItem,
+  ManagedAgentItem,
   ModelInventoryItem,
   OrchestratedTask,
   OwnerSessionInfo,
@@ -38,10 +45,13 @@ type ViewTab =
   | 'tasks'
   | 'approvals'
   | 'schedules'
+  | 'agents'
+  | 'projects'
   | 'models'
   | 'policy'
   | 'audit'
-  | 'security';
+  | 'security'
+  | 'admin';
 
 const NAV_ITEMS: Array<{
   id: ViewTab;
@@ -53,10 +63,13 @@ const NAV_ITEMS: Array<{
   { id: 'tasks', label: 'Task Center', mobileLabel: 'Tasks', icon: ListTodo },
   { id: 'approvals', label: 'Approval Inbox', mobileLabel: 'Approvals', icon: CheckSquare },
   { id: 'schedules', label: 'Schedules', mobileLabel: 'Schedules', icon: CalendarClock },
-  { id: 'models', label: 'Models & Runtimes', mobileLabel: 'Runtimes', icon: Cpu },
+  { id: 'agents', label: 'Agents', mobileLabel: 'Agents', icon: Bot },
+  { id: 'projects', label: 'Projects & Sites', mobileLabel: 'Projects', icon: FolderGit2 },
+  { id: 'models', label: 'Models & Workers', mobileLabel: 'Runtimes', icon: Cpu },
   { id: 'policy', label: 'Policy Inspector', mobileLabel: 'Policy', icon: Shield },
   { id: 'audit', label: 'Audit Center', mobileLabel: 'Audit', icon: FileText },
-  { id: 'security', label: 'Settings & Security', mobileLabel: 'Security', icon: Lock },
+  { id: 'security', label: 'Profile & Security', mobileLabel: 'Security', icon: Lock },
+  { id: 'admin', label: 'System Admin', mobileLabel: 'Admin', icon: ServerCog },
 ];
 
 const MOBILE_PRIMARY_TABS: ViewTab[] = ['overview', 'tasks', 'approvals', 'models', 'security'];
@@ -64,6 +77,7 @@ const MOBILE_PRIMARY_TABS: ViewTab[] = ['overview', 'tasks', 'approvals', 'model
 export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  const [embeddedFrame, setEmbeddedFrame] = useState(false);
   const [owner, setOwner] = useState<OwnerSessionInfo | null>(null);
   const [transportError, setTransportError] = useState<string | undefined>(undefined);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
@@ -81,6 +95,7 @@ export default function App() {
   const [tasks, setTasks] = useState<OrchestratedTask[]>([]);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [agents, setAgents] = useState<ManagedAgentItem[]>([]);
   const [models, setModels] = useState<ModelInventoryItem[]>([]);
   const [computeNodes, setComputeNodes] = useState<ComputeNodeItem[]>([]);
   const [trustedEndpoints, setTrustedEndpoints] = useState<TrustedEndpointItem[]>([]);
@@ -92,6 +107,7 @@ export default function App() {
     try {
       const status = await controlPlaneApi.getAuthStatus();
       setInitialized(status.initialized);
+      setEmbeddedFrame(status.embedded_frame === true);
       setTransportError(status.transport_error);
       setOwner(status.authenticated && status.owner ? status.owner : null);
     } catch (err) {
@@ -113,6 +129,7 @@ export default function App() {
         tasksRes,
         approvalsRes,
         schedulesRes,
+        agentsRes,
         modelsRes,
         auditRes,
       ] = await Promise.all([
@@ -120,6 +137,7 @@ export default function App() {
         controlPlaneApi.listTasks(),
         controlPlaneApi.listApprovals(),
         controlPlaneApi.listSchedules(),
+        controlPlaneApi.listAgents({ limit: 50, offset: 0 }),
         controlPlaneApi.listModels(),
         controlPlaneApi.listAuditEvents(),
       ]);
@@ -129,6 +147,7 @@ export default function App() {
       setTasks(tasksRes.tasks);
       setApprovals(approvalsRes.approvals);
       setSchedules(schedulesRes.schedules);
+      setAgents(agentsRes.agents);
       setModels(modelsRes.models);
       setComputeNodes(modelsRes.compute_nodes);
       setTrustedEndpoints(modelsRes.trusted_endpoints);
@@ -214,6 +233,7 @@ export default function App() {
         initialized={initialized}
         transportError={transportError}
         sessionNotice={sessionNotice}
+        embeddedFrame={embeddedFrame}
         onSetupCompleted={() => {
           setInitialized(true);
         }}
@@ -230,9 +250,10 @@ export default function App() {
 
   function isMobileTabActive(tabId: ViewTab): boolean {
     if (tabId === activeTab) return true;
+    if (tabId === 'overview' && (activeTab === 'agents' || activeTab === 'projects')) return true;
     if (tabId === 'tasks' && activeTab === 'schedules') return true;
     if (tabId === 'models' && activeTab === 'policy') return true;
-    if (tabId === 'security' && activeTab === 'audit') return true;
+    if (tabId === 'security' && (activeTab === 'audit' || activeTab === 'admin')) return true;
     return false;
   }
 
@@ -329,7 +350,45 @@ export default function App() {
         </header>
 
         <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5 pb-24 lg:pb-8 space-y-4">
-          {/* Mobile paired sub-switchers so all 8 sections are reachable within 1-2 taps */}
+          {/* Mobile paired sub-switchers so all 11 sections are reachable within 1-2 taps */}
+          {(activeTab === 'overview' || activeTab === 'agents' || activeTab === 'projects') && (
+            <div className="lg:hidden flex items-center gap-1 p-1 rounded-xl bg-[#0B1120] border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setActiveTab('overview')}
+                className={`flex-1 min-h-[40px] rounded-lg text-xs font-medium transition-colors ${
+                  activeTab === 'overview'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('agents')}
+                className={`flex-1 min-h-[40px] rounded-lg text-xs font-medium transition-colors ${
+                  activeTab === 'agents'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Agents
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('projects')}
+                className={`flex-1 min-h-[40px] rounded-lg text-xs font-medium transition-colors ${
+                  activeTab === 'projects'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Projects
+              </button>
+            </div>
+          )}
+
           {(activeTab === 'tasks' || activeTab === 'schedules') && (
             <div className="lg:hidden flex items-center gap-1 p-1 rounded-xl bg-[#0B1120] border border-slate-800">
               <button
@@ -368,7 +427,7 @@ export default function App() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Models & Runtimes
+                Models & Workers
               </button>
               <button
                 type="button"
@@ -384,7 +443,7 @@ export default function App() {
             </div>
           )}
 
-          {(activeTab === 'security' || activeTab === 'audit') && (
+          {(activeTab === 'security' || activeTab === 'audit' || activeTab === 'admin') && (
             <div className="lg:hidden flex items-center gap-1 p-1 rounded-xl bg-[#0B1120] border border-slate-800">
               <button
                 type="button"
@@ -395,7 +454,7 @@ export default function App() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Settings & Security
+                Profile & Security
               </button>
               <button
                 type="button"
@@ -406,7 +465,18 @@ export default function App() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Audit Trail
+                Audit
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('admin')}
+                className={`flex-1 min-h-[40px] rounded-lg text-xs font-medium transition-colors ${
+                  activeTab === 'admin'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Admin
               </button>
             </div>
           )}
@@ -478,9 +548,13 @@ export default function App() {
               approvals={approvals}
               loading={dataLoading}
               onRefresh={loadAllControlPlaneData}
-              onSelectTask={(taskId) => {
-                setSelectedTaskId(taskId);
-                setActiveTab('tasks');
+              onSelectTask={(targetId) => {
+                if (targetId.startsWith('proj_')) {
+                  setActiveTab('projects');
+                } else {
+                  setSelectedTaskId(targetId);
+                  setActiveTab('tasks');
+                }
               }}
             />
           )}
@@ -494,6 +568,21 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'agents' && (
+            <AgentsManagementView
+              models={models}
+              onRefresh={loadAllControlPlaneData}
+            />
+          )}
+
+          {activeTab === 'projects' && (
+            <ProjectsManagementView
+              agents={agents}
+              onRefresh={loadAllControlPlaneData}
+              onOpenApprovals={() => setActiveTab('approvals')}
+            />
+          )}
+
           {activeTab === 'models' && (
             <ModelsRuntimesView
               primaryRuntime={primaryRuntime}
@@ -501,6 +590,7 @@ export default function App() {
               computeNodes={computeNodes}
               trustedEndpoints={trustedEndpoints}
               loading={dataLoading}
+              onRefresh={loadAllControlPlaneData}
             />
           )}
 
@@ -525,6 +615,10 @@ export default function App() {
                 setSessionNotice(notice ?? null);
               }}
             />
+          )}
+
+          {activeTab === 'admin' && (
+            <SystemAdminView onRefreshAll={loadAllControlPlaneData} />
           )}
         </main>
       </div>

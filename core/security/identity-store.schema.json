@@ -47,6 +47,16 @@
               "type": "string",
               "format": "email"
             },
+            "display_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "timezone": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
             "password_hash": {
               "type": "string",
               "pattern": "^\\$argon2id\\$"
