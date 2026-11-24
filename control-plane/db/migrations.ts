@@ -402,6 +402,137 @@ export const STAGE3_MIGRATIONS: readonly SchemaMigration[] = [
       );
     `,
   },
+  {
+    version: 4,
+    name: '004_stage46_multi_agent_execution',
+    sql: `
+      CREATE TABLE IF NOT EXISTS department_agent_state (
+        agent_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (
+          status IN ('active', 'paused', 'disabled', 'retired')
+        ),
+        health TEXT NOT NULL DEFAULT 'unknown' CHECK (
+          health IN ('healthy', 'degraded', 'offline', 'unknown')
+        ),
+        current_task_id TEXT,
+        tasks_completed INTEGER NOT NULL DEFAULT 0 CHECK (tasks_completed >= 0),
+        tasks_failed INTEGER NOT NULL DEFAULT 0 CHECK (tasks_failed >= 0),
+        last_heartbeat_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS delegation_projects (
+        project_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        context_json TEXT NOT NULL,
+        allowed_agent_ids_json TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS delegation_tasks (
+        task_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        parent_task_id TEXT,
+        root_task_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        department TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (
+          status IN (
+            'CREATED', 'VALIDATING', 'QUEUED', 'ASSIGNED', 'RUNNING',
+            'WAITING_FOR_APPROVAL', 'RETRYING', 'COMPLETED', 'FAILED', 'CANCELLED'
+          )
+        ),
+        action TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        environment TEXT NOT NULL CHECK (
+          environment IN ('sandbox', 'local', 'staging', 'production')
+        ),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        output_json TEXT,
+        error_json TEXT,
+        risk_level TEXT NOT NULL DEFAULT 'low' CHECK (
+          risk_level IN ('low', 'medium', 'high', 'critical')
+        ),
+        approval_id TEXT,
+        approval_required INTEGER NOT NULL DEFAULT 0 CHECK (approval_required IN (0, 1)),
+        depth INTEGER NOT NULL DEFAULT 0 CHECK (depth >= 0),
+        max_depth INTEGER NOT NULL DEFAULT 2 CHECK (max_depth >= 0),
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+        max_retries INTEGER NOT NULL DEFAULT 0 CHECK (max_retries >= 0),
+        timeout_ms INTEGER NOT NULL DEFAULT 30000 CHECK (timeout_ms >= 100),
+        idempotency_key TEXT UNIQUE,
+        dependencies_json TEXT NOT NULL,
+        child_task_ids_json TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0, 1)),
+        started_at TEXT,
+        finished_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES delegation_projects(project_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_delegation_tasks_queue
+        ON delegation_tasks (status, created_at ASC);
+
+      CREATE INDEX IF NOT EXISTS idx_delegation_tasks_project
+        ON delegation_tasks (project_id, parent_task_id, created_at ASC);
+
+      CREATE TABLE IF NOT EXISTS delegation_task_events (
+        event_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        from_status TEXT,
+        to_status TEXT,
+        actor_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES delegation_tasks(task_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_delegation_events_task
+        ON delegation_task_events (task_id, created_at ASC);
+
+      CREATE TABLE IF NOT EXISTS model_worker_heartbeats (
+        worker_id TEXT PRIMARY KEY,
+        runtime_type TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        health TEXT NOT NULL CHECK (
+          health IN ('healthy', 'degraded', 'offline', 'unknown')
+        ),
+        active_jobs INTEGER NOT NULL DEFAULT 0 CHECK (active_jobs >= 0),
+        queue_length INTEGER NOT NULL DEFAULT 0 CHECK (queue_length >= 0),
+        latency_ms INTEGER,
+        models_json TEXT NOT NULL,
+        last_error TEXT,
+        last_heartbeat_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS execution_alerts (
+        alert_id TEXT PRIMARY KEY,
+        severity TEXT NOT NULL CHECK (
+          severity IN ('info', 'warning', 'critical')
+        ),
+        code TEXT NOT NULL,
+        message TEXT NOT NULL,
+        task_id TEXT,
+        agent_id TEXT,
+        worker_id TEXT,
+        created_at TEXT NOT NULL,
+        acknowledged_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_execution_alerts_open
+        ON execution_alerts (acknowledged_at, created_at DESC);
+    `,
+  },
 ];
 
 export interface AppliedMigrationRecord {

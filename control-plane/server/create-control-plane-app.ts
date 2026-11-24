@@ -68,8 +68,17 @@ import {
 } from '../db/index.ts';
 import {
   AgentExecutionEngine,
+  ContainerSandboxAdapter,
   MockSandboxAdapter,
 } from '../../execution/index.ts';
+import {
+  AgentSandboxExecutor,
+  AirLlmModelWorker,
+  DelegationEngine,
+  SqliteDelegationStore,
+  type DelegationStore,
+  type ModelWorkerClient,
+} from '../../agents/index.ts';
 import { ManagementService } from '../management/index.ts';
 import {
   TaskOrchestrator,
@@ -97,6 +106,13 @@ export interface ControlPlaneServerOptions {
   externalHandlers?: Record<string, ExternalTaskActionHandler>;
   rateLimitMaxRequestsPerMinute?: number;
   clock?: () => Date;
+  sandboxProvider?: string;
+  sandboxDockerCommand?: string[];
+  sandboxImage?: string;
+  sandboxRoot?: string;
+  allowSimulatedSandbox?: boolean;
+  maxConcurrentDelegationTasks?: number;
+  maxTotalDelegationTasksPerProject?: number;
 }
 
 export interface ControlPlaneAppBundle {
@@ -112,6 +128,10 @@ export interface ControlPlaneAppBundle {
   router: ModelRouter;
   orchestrator: TaskOrchestrator;
   executionEngine: AgentExecutionEngine;
+  delegationStore: DelegationStore;
+  delegationEngine: DelegationEngine;
+  sandboxAdapter: ContainerSandboxAdapter;
+  modelWorker: ModelWorkerClient | null;
   management: ManagementService;
   close: () => void;
 }
@@ -303,22 +323,22 @@ export function createControlPlaneApp(
     clock,
   });
 
+  const resolvedDbPath =
+    options.dbPath ?? path.resolve(stateDir, 'tejaura-control-plane.db');
   const store: OrchestrationStore =
-    options.store ??
-    new SqliteOrchestrationStore({
-      dbPath: options.dbPath ?? path.resolve(stateDir, 'tejaura-control-plane.db'),
-    });
+    options.store ?? new SqliteOrchestrationStore({ dbPath: resolvedDbPath });
 
   const registry =
     options.registry ??
     new LocalModelRegistry(localModelsDefault as LocalModelRegistryDocument);
   const hardware =
     options.hardware ?? new HardwareManager(buildDefaultComputeNodes());
+  const trustedEndpoints =
+    options.trustedEndpoints ?? getDefaultTrustedEndpoints();
   const runtime =
     options.runtime ??
     new RuntimeManager({
-      trustedEndpoints:
-        options.trustedEndpoints ?? getDefaultTrustedEndpoints(),
+      trustedEndpoints,
       authTokenResolver: (endpoint) => {
         if (endpoint.runtime_type !== 'airllm') {
           return undefined;
@@ -359,6 +379,47 @@ export function createControlPlaneApp(
     clock,
   });
 
+  const requestedSandboxProvider =
+    options.sandboxProvider ??
+    process.env.TEJAURA_SANDBOX_PROVIDER ??
+    (envMode === 'production' ? 'isolated_container_v1' : 'mock_sandbox_v1');
+  const allowSimulatedSandbox =
+    options.allowSimulatedSandbox ?? envMode !== 'production';
+  if (envMode === 'production' && requestedSandboxProvider === 'mock_sandbox_v1') {
+    throw new Error(
+      'Production requires TEJAURA_SANDBOX_PROVIDER=isolated_container_v1. The mock sandbox is not production-safe.',
+    );
+  }
+  if (
+    envMode === 'production' &&
+    allowSimulatedSandbox &&
+    requestedSandboxProvider !== 'isolated_container_v1'
+  ) {
+    throw new Error(
+      'Production requires the isolated_container_v1 sandbox provider; simulated execution is not permitted.',
+    );
+  }
+  const sandboxDockerCommand =
+    options.sandboxDockerCommand ??
+    (typeof process.env.TEJAURA_CONTAINER_COMMAND === 'string' &&
+    process.env.TEJAURA_CONTAINER_COMMAND.trim().length > 0
+      ? process.env.TEJAURA_CONTAINER_COMMAND.trim().split(/\s+/)
+      : ['docker']);
+  const sandboxRoot =
+    options.sandboxRoot ?? path.resolve(stateDir, 'sandbox', 'executions');
+  fs.mkdirSync(sandboxRoot, { recursive: true, mode: 0o700 });
+  const mockSandboxAdapter = new MockSandboxAdapter({ router, systemConfig });
+  const containerSandboxAdapter = new ContainerSandboxAdapter({
+    dockerCommand: sandboxDockerCommand,
+    image: options.sandboxImage ?? process.env.TEJAURA_SANDBOX_IMAGE ?? 'node:22-alpine',
+    sandboxRoot,
+    knownSecretValues: [
+      process.env.TEJAURA_SECRETS_MASTER_KEY ?? '',
+      process.env.TEJAURA_AIRLLM_WORKER_TOKEN ?? '',
+    ].filter((value) => value.length >= 8),
+    clock,
+  });
+
   const executionEngine = new AgentExecutionEngine({
     store,
     approvals: orchestrator.getApprovalService(),
@@ -370,11 +431,63 @@ export function createControlPlaneApp(
       defaultNetworkMode: 'none',
       defaultBrowserMode: 'disabled',
     },
-    adapters: [new MockSandboxAdapter({ router, systemConfig })],
-    defaultSandboxProvider: 'mock_sandbox_v1',
+    adapters: [mockSandboxAdapter, containerSandboxAdapter],
+    defaultSandboxProvider: requestedSandboxProvider,
     clock,
   });
   executionEngine.recoverOnStartup();
+
+  const delegationStore = new SqliteDelegationStore({ dbPath: resolvedDbPath });
+  const airllmEndpoint = trustedEndpoints.find(
+    (endpoint) => endpoint.runtime_type === 'airllm' && endpoint.enabled,
+  );
+  const modelWorker: ModelWorkerClient | null = airllmEndpoint
+    ? new AirLlmModelWorker({
+        worker_id: 'airllm_primary_worker',
+        runtime,
+        endpoint: airllmEndpoint,
+        modelName: 'tejaura-reasoning-primary',
+        agent: {
+          id: 'ceo_strategy',
+          name: 'CEO Strategy Agent',
+          department: 'executive',
+          role: 'Chief Executive / Strategy',
+          description: 'Stage 4.6 model worker caller.',
+          status: 'active',
+          enabled: true,
+          permitted_autonomy_level: 'L2',
+          allowed_tool_ids: ['ceo_planner'],
+          preferred_model_ids: ['tejaura-reasoning-primary'],
+          created_at: clock().toISOString(),
+          schema_version: '1.0.0',
+        },
+        auditLogger,
+        systemConfig,
+        correlationId: 'corr_stage46_model_worker',
+        knownSecretValues: [
+          process.env.TEJAURA_SECRETS_MASTER_KEY ?? '',
+          process.env.TEJAURA_AIRLLM_WORKER_TOKEN ?? '',
+        ].filter((value) => value.length >= 8),
+      })
+    : null;
+  const sandboxExecutor = new AgentSandboxExecutor({
+    executionEngine,
+    providerId: requestedSandboxProvider,
+    allowSimulatedProvider: allowSimulatedSandbox,
+    correlationId: 'corr_stage46_engineering',
+  });
+  const delegationEngine = new DelegationEngine({
+    store: delegationStore,
+    approvals: orchestrator.getApprovalService(),
+    auditLogger,
+    systemConfig,
+    clock,
+    modelWorker,
+    sandboxExecutor,
+    maxConcurrentTasks: options.maxConcurrentDelegationTasks ?? 2,
+    maxTotalTasksPerProject: options.maxTotalDelegationTasksPerProject ?? 40,
+  });
+  delegationEngine.recoverOnStartup();
 
   const management = new ManagementService({
     store,
@@ -1677,6 +1790,26 @@ export function createControlPlaneApp(
       }
 
       const existingApr = orchestrator.getApprovalService().getApproval(approvalId);
+      if (existingApr && existingApr.task_id.startsWith('dtask_')) {
+        const delegationRes = delegationEngine.decideDelegationApproval({
+          approval_id: approvalId,
+          decision,
+          reviewer: req.tejauraSession!.toTrustedReviewerContext(),
+          reason,
+          correlation_id: req.tejauraCorrelationId ?? 'corr_approval_decide',
+        });
+        if (!delegationRes.ok) {
+          res.status(delegationRes.code === 'APPROVAL_NOT_FOUND' ? 404 : 409).json(delegationRes);
+          return;
+        }
+        res.json({
+          ok: true,
+          approval: delegationRes.approval,
+          delegation_task: delegationRes.task,
+          task: null,
+        });
+        return;
+      }
       if (existingApr && existingApr.task_id.startsWith('proj_')) {
         const projRes = management.decideProjectApproval({
           approval_id: approvalId,
@@ -2545,6 +2678,282 @@ export function createControlPlaneApp(
   );
 
   app.get(
+    '/api/stage46/overview',
+    requireOwnerAuth('governance:read'),
+    async (_req: Request, res: Response) => {
+      try {
+        const overview = await delegationEngine.getOverview();
+        res.json({ ok: true, ...overview });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          code: 'STAGE46_OVERVIEW_FAILED',
+          error: err instanceof Error ? err.message : 'Unable to load Stage 4.6 overview.',
+        });
+      }
+    },
+  );
+
+  app.get(
+    '/api/stage46/agents',
+    requireOwnerAuth('governance:read'),
+    async (_req: Request, res: Response) => {
+      res.json({
+        ok: true,
+        agents: delegationEngine.listAgents(),
+        sandbox: await delegationEngine.getSandboxCapabilities(),
+      });
+    },
+  );
+
+  app.get(
+    '/api/stage46/metrics',
+    requireOwnerAuth('governance:read'),
+    (_req: Request, res: Response) => {
+      res.json({
+        ok: true,
+        metrics: delegationEngine.getQueueMetrics(),
+        alerts: delegationEngine.listAlerts(50),
+        workers: delegationEngine.listWorkerHeartbeats(),
+      });
+    },
+  );
+
+  app.get(
+    '/api/stage46/projects',
+    requireOwnerAuth('governance:read'),
+    (_req: Request, res: Response) => {
+      res.json({ ok: true, projects: delegationEngine.listProjects(50) });
+    },
+  );
+
+  app.post(
+    '/api/stage46/projects',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      if (!isPlainObject(req.body)) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_OBJECTIVE_BODY',
+          error: 'JSON body is required.',
+        });
+        return;
+      }
+      const name = sanitizeString(req.body.name, 2, 160);
+      const objective = sanitizeString(req.body.objective, 8, 4000);
+      if (!name || !objective) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_OBJECTIVE_FIELDS',
+          error: 'Project name (2-160 chars) and objective (8-4000 chars) are required.',
+        });
+        return;
+      }
+      const environment =
+        req.body.environment === 'sandbox' ||
+        req.body.environment === 'local' ||
+        req.body.environment === 'staging' ||
+        req.body.environment === 'production'
+          ? req.body.environment
+          : 'local';
+      if (environment === 'production') {
+        res.status(400).json({
+          ok: false,
+          code: 'OBJECTIVE_PRODUCTION_NOT_SUPPORTED',
+          error: 'Stage 4.6 objectives run in sandbox/local. Production actions require separate approval.',
+        });
+        return;
+      }
+      const result = delegationEngine.createObjective(
+        {
+          name,
+          objective,
+          context: isPlainObject(req.body.context) ? req.body.context : {},
+          environment,
+          idempotency_key:
+            typeof req.body.idempotency_key === 'string'
+              ? req.body.idempotency_key.slice(0, 128)
+              : undefined,
+        },
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_stage46_objective',
+        },
+      );
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.status(201).json({ ok: true, ...result.data });
+    },
+  );
+
+  app.get(
+    '/api/stage46/projects/:id',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const projectId = sanitizeString(req.params.id, 3, 128);
+      if (!projectId) {
+        res.status(400).json({ ok: false, code: 'INVALID_PROJECT_ID', error: 'Invalid project ID.' });
+        return;
+      }
+      const project = delegationEngine.getProject(projectId);
+      if (!project) {
+        res.status(404).json({ ok: false, code: 'PROJECT_NOT_FOUND', error: 'Project not found.' });
+        return;
+      }
+      res.json({
+        ok: true,
+        project,
+        tasks: delegationEngine.listTasks({ projectId, limit: 200 }),
+      });
+    },
+  );
+
+  app.get(
+    '/api/stage46/tasks',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 50;
+      const limit = Number.isFinite(rawLimit)
+        ? Math.max(1, Math.min(200, Math.round(rawLimit)))
+        : 50;
+      const status =
+        typeof req.query.status === 'string' &&
+        [
+          'CREATED',
+          'VALIDATING',
+          'QUEUED',
+          'ASSIGNED',
+          'RUNNING',
+          'WAITING_FOR_APPROVAL',
+          'RETRYING',
+          'COMPLETED',
+          'FAILED',
+          'CANCELLED',
+        ].includes(req.query.status)
+          ? (req.query.status as import('../../agents/index.ts').DelegationTaskStatus)
+          : undefined;
+      const tasks = delegationEngine.listTasks({
+        projectId:
+          typeof req.query.project_id === 'string' ? req.query.project_id : undefined,
+        agentId: typeof req.query.agent_id === 'string' ? req.query.agent_id : undefined,
+        status,
+        limit,
+      });
+      res.json({ ok: true, tasks, metrics: delegationEngine.getQueueMetrics() });
+    },
+  );
+
+  app.get(
+    '/api/stage46/tasks/:id',
+    requireOwnerAuth('governance:read'),
+    (req: Request, res: Response) => {
+      const taskId = sanitizeString(req.params.id, 3, 128);
+      if (!taskId) {
+        res.status(400).json({ ok: false, code: 'INVALID_TASK_ID', error: 'Invalid task ID.' });
+        return;
+      }
+      const detail = delegationEngine.getTaskDetail(taskId);
+      if (!detail) {
+        res.status(404).json({ ok: false, code: 'DELEGATION_TASK_NOT_FOUND', error: 'Task not found.' });
+        return;
+      }
+      res.json({ ok: true, ...detail });
+    },
+  );
+
+  app.post(
+    '/api/stage46/tasks/:id/cancel',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const taskId = sanitizeString(req.params.id, 3, 128);
+      const reason = sanitizeString(
+        isPlainObject(req.body) ? req.body.reason : undefined,
+        2,
+        500,
+      );
+      if (!taskId || !reason) {
+        res.status(400).json({
+          ok: false,
+          code: 'INVALID_CANCEL_REQUEST',
+          error: 'Task ID and a 2-500 character reason are required.',
+        });
+        return;
+      }
+      const result = delegationEngine.cancelTask(
+        taskId,
+        {
+          actor: req.tejauraSession!.toPolicyActor(),
+          correlation_id: req.tejauraCorrelationId ?? 'corr_stage46_cancel',
+        },
+        reason,
+      );
+      if (!result.ok) {
+        res.status(result.code === 'TASK_NOT_FOUND' ? 404 : 409).json(result);
+        return;
+      }
+      res.json(result);
+    },
+  );
+
+  app.post(
+    '/api/stage46/queue/process',
+    requireOwnerAuth('sandbox:execute'),
+    async (req: Request, res: Response) => {
+      const rawLimit = isPlainObject(req.body) ? Number(req.body.limit) : 5;
+      const limit = Number.isFinite(rawLimit)
+        ? Math.max(1, Math.min(20, Math.round(rawLimit)))
+        : 5;
+      try {
+        await delegationEngine.refreshWorkerHealth();
+        delegationEngine.watchdogScan();
+        const summary = await delegationEngine.processQueue(limit);
+        res.json({
+          ok: true,
+          summary,
+          metrics: delegationEngine.getQueueMetrics(),
+        });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          code: 'DELEGATION_QUEUE_PROCESS_FAILED',
+          error: err instanceof Error ? err.message : 'Queue processing failed.',
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/api/stage46/alerts/:id/ack',
+    requireOwnerAuth('governance:write'),
+    (req: AuthedRequest, res: Response) => {
+      const alertId = sanitizeString(req.params.id, 3, 128);
+      if (!alertId) {
+        res.status(400).json({ ok: false, code: 'INVALID_ALERT_ID', error: 'Invalid alert ID.' });
+        return;
+      }
+      const acknowledged = delegationEngine.acknowledgeAlert(
+        alertId,
+        req.tejauraSession!.toPolicyActor().id,
+      );
+      if (!acknowledged) {
+        res.status(404).json({ ok: false, code: 'ALERT_NOT_FOUND', error: 'Alert not found or already acknowledged.' });
+        return;
+      }
+      res.json({ ok: true, alert_id: alertId });
+    },
+  );
+
+  app.get(
+    '/api/stage46/sandbox',
+    requireOwnerAuth('governance:read'),
+    async (_req: Request, res: Response) => {
+      res.json({ ok: true, sandbox: await delegationEngine.getSandboxCapabilities() });
+    },
+  );
+
+  app.get(
     '/api/system/logs',
     requireOwnerAuth('audit:read'),
     (req: Request, res: Response) => {
@@ -2645,9 +3054,14 @@ export function createControlPlaneApp(
     router,
     orchestrator,
     executionEngine,
+    delegationStore,
+    delegationEngine,
+    sandboxAdapter: containerSandboxAdapter,
+    modelWorker,
     management,
     close: () => {
       orchestrator.stopWorkerLoop();
+      delegationStore.close();
       store.close();
     },
   };

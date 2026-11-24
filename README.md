@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Stage 4.5 — Owner Management Center, Authentication Repair & Security Audit Implemented (Pre-Alpha)
-> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/`), Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`), Stage 4 Sandboxed Agent Execution Foundation (`execution/`, SQLite v2 execution jobs & logs, `MockSandboxAdapter`), and Stage 4.5 Owner Management Center with transport-safe auth, approval-gated runtime/project mutations, persistent agent/model/worker/project administration, backups, and audit inspection. OS-level `isolated_container` sandboxing, concrete department agents, physical GPU verification, and Stage 5 integrations remain **pending**.
+> **Status:** Stage 4.6 — Real Isolated Execution, Department Agents & Multi-Agent Orchestration Implemented (Pre-Alpha)
+> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/`), Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`), Stage 4 Sandboxed Agent Execution Foundation (`execution/`, SQLite v2 execution jobs & logs, `MockSandboxAdapter`), Stage 4.5 Owner Management Center with transport-safe auth, approval-gated runtime/project mutations, persistent agent/model/worker/project administration, backups, and audit inspection, and Stage 4.6 Real Isolated Execution with Docker container sandboxing, ten department agents (including bounded research synthesis), owner-gated multi-agent delegation, AirLLM worker integration, and an AI Workforce UI. Physical GPU verification and Stage 5 external integrations remain **pending**.
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -48,6 +48,14 @@ To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilit
   - **Execution Engine & Persistence:** Converts approved agent tasks into persistent SQLite execution jobs (`queued`, `running`, `completed`, `failed`, `cancelled`) and structured secret-redacted logs (`002_stage4_agent_execution`), with timeouts, owner-only cancellation, bounded retries, idempotency keys, and restart recovery.
   - **Default-Deny Sandbox Policy & Mock Adapter:** `Agent`/`Tool` contract validation, workspace path allowlists, shell blocking, unrestricted network/browser denial, `ApprovalService` gating, and `MockSandboxAdapter` (`supportsOsIsolation: false` — dev/test simulation only).
 
+- **Stage 4.6 Real Isolated Execution, Department Agents & Multi-Agent Orchestration (`agents/`, `execution/`, `control-plane/`, `src/`):**
+  - **Real Container Isolation:** `ContainerSandboxAdapter` + a fixed Node runner execute engineering tasks in Docker with a non-root UID, read-only root filesystem, all capabilities dropped, `no-new-privileges`, `--network=none`, PID/memory/CPU limits, path-confined writes, a closed test-command allowlist, structured test evidence, and secret redaction. Docker absence fails closed; production rejects the mock provider.
+  - **Ten Department Agents:** CEO Strategy, Engineering, Design, SEO, Content & Social, Analytics, Security, QA, Customer Support, and Research, each with distinct capabilities, closed actions, scoped tools, JSON schemas, autonomy ceilings, retry/depth limits, and explicit delegate allowlists.
+  - **Owner-Gated Delegation:** A persistent delegation DAG with idempotency, dependencies, bounded retries, depth/child limits, owner cancellation, startup recovery, watchdog alerts, and CEO consolidation. Self-delegation, unknown actions, and privilege-field injection are rejected.
+  - **Approval & Audit Reuse:** Sensitive delegation tasks create real `ApprovalService` records; only the designated owner can decide them; decisions and every task transition are audited. Content approval authorizes a manual release package and never auto-publishes.
+  - **AirLLM Worker Integration:** `AirLlmModelWorker` uses the existing authenticated `RuntimeManager` AirLLM contract, marks output untrusted, redacts secrets, persists worker heartbeats, and creates unhealthy-worker alerts. Deterministic CEO planning works without a model worker; no paid API fallback exists.
+  - **Owner API & UI:** `/api/stage46/*` routes and a mobile-first “AI Workforce” tab expose agents, objectives, pipeline status, approval links, sandbox isolation status, worker health, alerts, and task event timelines.
+
 - **Stage 4.5 Owner Management Center, Authentication Repair & Security Audit (`control-plane/management/`, `src/`, `core/secrets/`):**
   - **Transport-Safe Auth:** `https_direct`, `https_embedded_iframe` (CHIPS partitioned cookies), and strictly loopback-only `http_loopback_dev` session modes; multi-hop proxy-aware CSRF origin checks; post-login cookie verification; TOTP whitespace normalization.
   - **Owner Management Modules:** Persistent SQLite v3 records for agents, models, workers, projects, system config, and backups, exposed through owner-authenticated management APIs and a mobile-first management UI.
@@ -55,7 +63,7 @@ To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilit
   - **Security Repairs:** Removed fabricated owner auto-approval paths, added startup-only rehydration for persisted models/endpoints without minting approvals, and made encrypted vault writes atomic with strict entry validation.
 
 ### Planned / Not Yet Hardware- or Deployment-Verified
-- **Remaining Stage 4:** OS-level `isolated_container` `SandboxAdapter`, concrete department agents (`research`, `engineering`, `seo`, `design`, `content`, `analytics`, `customer_support`), dry-run diffs, and execution job UI tabs.
+- **Remaining Stage 4:** physical GPU/NVMe AirLLM verification, dry-run diffs, and deeper execution-job inspection UI tabs. OS-level `isolated_container` sandboxing and concrete department agents are now implemented in Stage 4.6.
 - **Stage 5:** Supervised `L3` external integrations, end-to-end penetration/security audit, and physical GPU/Android device deployment verification.
 
 ---
@@ -101,5 +109,6 @@ To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilit
 - [Local Model Infrastructure](docs/LOCAL_MODELS.md)
 - [Stage 3 Control Plane Guide](docs/CONTROL_PLANE_STAGE3.md)
 - [Stage 4 Agent Execution Foundation](docs/STAGE4_AGENT_EXECUTION.md)
+- [Stage 4.6 Real Isolated Execution & Multi-Agent Orchestration](docs/STAGE4_6_MULTI_AGENT.md)
 - [System Architecture](docs/ARCHITECTURE.md)
 - [Development Roadmap](docs/ROADMAP.md)

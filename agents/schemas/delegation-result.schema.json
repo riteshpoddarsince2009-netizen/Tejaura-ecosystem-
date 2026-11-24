@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/stage46/delegation-result.schema.json",
+  "title": "TEJAURA Stage 4.6 Department Agent Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "deliverables", "model_assisted"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "needs_approval", "blocked", "failed"]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "deliverables": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "content"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "kind": {
+            "type": "string",
+            "enum": ["plan", "specification", "copy", "code", "report", "review", "recommendation", "test_evidence"]
+          },
+          "content": { "type": "string", "maxLength": 200000 }
+        }
+      }
+    },
+    "delegations": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "target_agent_id", "title", "description", "action", "input"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "target_agent_id": { "type": "string", "minLength": 2, "maxLength": 128 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "action": { "type": "string", "minLength": 3, "maxLength": 128 },
+          "input": { "type": "object" },
+          "depends_on_keys": {
+            "type": "array",
+            "maxItems": 12,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        }
+      }
+    },
+    "approval_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "resource_id", "reason", "risk_level", "required_scope"],
+      "properties": {
+        "action": { "type": "string", "minLength": 3, "maxLength": 128 },
+        "resource_id": { "type": "string", "minLength": 2, "maxLength": 128 },
+        "reason": { "type": "string", "minLength": 2, "maxLength": 1000 },
+        "risk_level": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "required_scope": { "type": "string", "minLength": 3, "maxLength": 128 },
+        "environment": {
+          "type": "string",
+          "enum": ["sandbox", "local", "staging", "production"]
+        }
+      }
+    },
+    "model_assisted": { "type": "boolean" },
+    "test_evidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "executed": { "type": "boolean" },
+        "command": { "type": "string" },
+        "exit_code": { "type": "number" },
+        "output": { "type": "string" }
+      }
+    },
+    "metadata": { "type": "object" }
+  }
+}

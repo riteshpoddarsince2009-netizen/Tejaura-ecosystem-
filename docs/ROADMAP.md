@@ -1,6 +1,6 @@
 # TEJAURA Development Roadmap
 
-**Current Position:** Stage 4 Foundation — Sandboxed Agent Execution Engine, Policy/Approval Gates, Secret Redaction & SQLite Job Persistence Complete *(Mock-Verified; OS-Level Container Isolation & Concrete Department Agents Remaining)*  
+**Current Position:** Stage 4.6 — Real Isolated Execution, Department Agents & Multi-Agent Orchestration Complete *(Automated-Test Verified; Physical GPU Verification & Stage 5 External Integrations Remaining)*
 **Guiding Constraints:** Human-governed, open-source-first, local-model-first (AirLLM primary), model-provider agnostic, phone-first control plane, free-first, modular, and testable.
 
 ---
@@ -78,17 +78,32 @@
 
 ---
 
-## Stage 4 — Sandboxed Agent Execution Foundation & Modular Agents *(Foundation Complete — Container Isolation & Concrete Agents Pending)*
-**Status:** Execution Infrastructure Implemented & Automated-Test Verified (`MockSandboxAdapter` — No OS-Level Container Isolation Yet)
+## Stage 4 — Sandboxed Agent Execution Foundation & Modular Agents *(Complete via Stage 4.6)*
+**Status:** Execution Infrastructure Implemented & Automated-Test Verified (`MockSandboxAdapter` for dev/test; real `ContainerSandboxAdapter` added in Stage 4.6)
 
 - [x] Implement `AgentExecutionEngine` (`execution/agent-execution-engine.ts`) converting approved tasks into persistent SQLite jobs (`queued -> running -> completed | failed | cancelled`) with migration `002_stage4_agent_execution`
 - [x] Define swappable `SandboxAdapter` boundary (`execution/execution-types.ts`) and `MockSandboxAdapter` (`supportsOsIsolation: false`) with AirLLM-first `ModelRouter` integration and zero shell spawning
 - [x] Enforce default-deny sandbox policy (`execution/sandbox-policy.ts`): `Agent`/`Tool` contract checks, workspace path allowlists, shell blocking, unrestricted network/browser denial, and agent privilege/self-approval prevention
 - [x] Reuse `ApprovalService` single-use owner approval gating, `AbortSignal` timeouts/cancellation, bounded retry limits, idempotency deduplication, startup crash recovery, and thorough secret redaction (`execution/secret-redactor.ts`)
 - [x] Expose RBAC-protected `/api/execution/*` endpoints and pass Stage 4 automated execution test suite (`execution/tests/stage4-execution.test.ts`)
-- [ ] Implement `isolated_container` `SandboxAdapter` with OS-level filesystem, PID, CPU/memory, and network namespace isolation
-- [ ] Implement concrete department agent workflows (`research`, `engineering`, `seo`, `design`, `content`, `analytics`, `customer_support`) and dry-run workspace diffs
-- [ ] Add dedicated Stage 4 execution job & log views to the mobile-first Control Plane UI (`src/`)
+- [x] Implement `isolated_container` `SandboxAdapter` with OS-level filesystem, PID, CPU/memory, and network namespace isolation (Stage 4.6)
+- [x] Implement concrete department agent workflows and owner-gated multi-agent delegation (Stage 4.6)
+- [x] Add the AI Workforce UI with pipeline, task events, approvals, sandbox status, workers, and alerts (Stage 4.6)
+- [ ] Add dry-run workspace diffs and deeper execution-job inspection tabs
+
+---
+
+## Stage 4.6 — Real Isolated Execution & Multi-Agent Orchestration *(Complete)*
+**Status:** Implemented & Automated-Test Verified
+
+- [x] Real Docker container sandbox (`execution/container-sandbox-adapter.ts`, `execution/container-runner.mjs`): non-root, read-only rootfs, capability drop, `no-new-privileges`, `--network=none`, PID/memory/CPU limits, path-confined writes, closed test-command allowlist, secret redaction
+- [x] Ten department agents with distinct capabilities, scoped tools, JSON schemas, autonomy ceilings, retry/depth limits, and explicit delegate allowlists
+- [x] Persistent delegation DAG with idempotency, dependencies, bounded retries, owner cancellation, startup recovery, watchdog alerts, and CEO consolidation
+- [x] Fail-closed validation for self-delegation, unknown actions, privilege-field injection, unknown agents, and depth/child overflow
+- [x] Owner-only approval routing for `dtask_` approvals, audit of every transition, and manual-release-only content publishing
+- [x] AirLLM model worker integration through the existing authenticated `RuntimeManager` contract, secret redaction, heartbeat persistence, and unhealthy-worker alerts
+- [x] Owner APIs (`/api/stage46/*`) and mobile-first AI Workforce UI
+- [ ] Physical GPU/NVMe AirLLM throughput verification
 
 ---
 

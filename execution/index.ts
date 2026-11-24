@@ -9,6 +9,12 @@ export {
   type MockSandboxStepHandler,
 } from './mock-sandbox-adapter.ts';
 
+export {
+  ContainerSandboxAdapter,
+  type ContainerSandboxAdapterOptions,
+  type ContainerSandboxCapabilities,
+} from './container-sandbox-adapter.ts';
+
 export { validateSandboxExecution } from './sandbox-policy.ts';
 
 export {

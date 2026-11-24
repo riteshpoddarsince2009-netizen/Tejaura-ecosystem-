@@ -9,6 +9,7 @@ import {
   FolderGit2,
   ListTodo,
   Lock,
+  Network,
   LogOut,
   ServerCog,
   Shield,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ApiError, controlPlaneApi } from './api/client.ts';
 import { AgentsManagementView } from './components/AgentsManagementView.tsx';
+import { AIWorkforceView } from './components/AIWorkforceView.tsx';
 import { ApprovalInboxView } from './components/ApprovalInboxView.tsx';
 import { AuditCenterView } from './components/AuditCenterView.tsx';
 import { AuthScreen } from './components/AuthScreen.tsx';
@@ -46,6 +48,7 @@ type ViewTab =
   | 'approvals'
   | 'schedules'
   | 'agents'
+  | 'workforce'
   | 'projects'
   | 'models'
   | 'policy'
@@ -64,6 +67,7 @@ const NAV_ITEMS: Array<{
   { id: 'approvals', label: 'Approval Inbox', mobileLabel: 'Approvals', icon: CheckSquare },
   { id: 'schedules', label: 'Schedules', mobileLabel: 'Schedules', icon: CalendarClock },
   { id: 'agents', label: 'Agents', mobileLabel: 'Agents', icon: Bot },
+  { id: 'workforce', label: 'AI Workforce', mobileLabel: 'Workforce', icon: Network },
   { id: 'projects', label: 'Projects & Sites', mobileLabel: 'Projects', icon: FolderGit2 },
   { id: 'models', label: 'Models & Workers', mobileLabel: 'Runtimes', icon: Cpu },
   { id: 'policy', label: 'Policy Inspector', mobileLabel: 'Policy', icon: Shield },
@@ -573,6 +577,10 @@ export default function App() {
               models={models}
               onRefresh={loadAllControlPlaneData}
             />
+          )}
+
+          {activeTab === 'workforce' && (
+            <AIWorkforceView onOpenApprovals={() => setActiveTab('approvals')} />
           )}
 
           {activeTab === 'projects' && (

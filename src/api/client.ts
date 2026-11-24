@@ -21,7 +21,17 @@ import type {
   OrchestratedTask,
   OwnerProfileInfo,
   ScheduleItem,
+  DelegationMetrics,
+  DelegationProjectItem,
+  DelegationTaskEventItem,
+  DelegationTaskItem,
+  DelegationTaskStatus,
+  DepartmentAgentItem,
+  SandboxCapabilitiesItem,
+  Stage46Overview,
   SystemAdminOverview,
+  DelegationAlertItem,
+  WorkerHeartbeatItem,
   SystemBackupItem,
   SystemConfigSettings,
   SystemOverviewResponse,
@@ -643,6 +653,115 @@ export const controlPlaneApi = {
   deleteProject(projectId: string): Promise<{ ok: true; project_id: string }> {
     return apiRequest(`/api/projects/${encodeURIComponent(projectId)}`, {
       method: 'DELETE',
+    });
+  },
+
+  // -------------------- Stage 4.6 Department Agents & Orchestration --------------------
+
+  getStage46Overview(): Promise<{ ok: true } & Stage46Overview> {
+    return apiRequest('/api/stage46/overview');
+  },
+
+  listStage46Agents(): Promise<{
+    ok: true;
+    agents: DepartmentAgentItem[];
+    sandbox: SandboxCapabilitiesItem | null;
+  }> {
+    return apiRequest('/api/stage46/agents');
+  },
+
+  getStage46Sandbox(): Promise<{ ok: true; sandbox: SandboxCapabilitiesItem | null }> {
+    return apiRequest('/api/stage46/sandbox');
+  },
+
+  listStage46Projects(): Promise<{ ok: true; projects: DelegationProjectItem[] }> {
+    return apiRequest('/api/stage46/projects');
+  },
+
+  createStage46Project(input: {
+    name: string;
+    objective: string;
+    context?: Record<string, unknown>;
+    environment?: 'sandbox' | 'local' | 'staging';
+    idempotency_key?: string;
+  }): Promise<{
+    ok: true;
+    project: DelegationProjectItem;
+    task: DelegationTaskItem;
+    duplicate: boolean;
+  }> {
+    return apiRequest('/api/stage46/projects', { method: 'POST', body: input });
+  },
+
+  listStage46Tasks(filter?: {
+    project_id?: string;
+    agent_id?: string;
+    status?: DelegationTaskStatus;
+    limit?: number;
+  }): Promise<{
+    ok: true;
+    tasks: DelegationTaskItem[];
+    metrics: DelegationMetrics;
+  }> {
+    const params = new URLSearchParams();
+    if (filter?.project_id) params.set('project_id', filter.project_id);
+    if (filter?.agent_id) params.set('agent_id', filter.agent_id);
+    if (filter?.status) params.set('status', filter.status);
+    if (filter?.limit !== undefined) params.set('limit', String(filter.limit));
+    const q = params.toString();
+    return apiRequest(`/api/stage46/tasks${q ? `?${q}` : ''}`);
+  },
+
+  getStage46Task(taskId: string): Promise<{
+    ok: true;
+    task: DelegationTaskItem;
+    project: DelegationProjectItem | null;
+    events: DelegationTaskEventItem[];
+    children: DelegationTaskItem[];
+  }> {
+    return apiRequest(`/api/stage46/tasks/${encodeURIComponent(taskId)}`);
+  },
+
+  cancelStage46Task(taskId: string, reason: string): Promise<{
+    ok: true;
+    task: DelegationTaskItem;
+    cancelled_count: number;
+  }> {
+    return apiRequest(`/api/stage46/tasks/${encodeURIComponent(taskId)}/cancel`, {
+      method: 'POST',
+      body: { reason },
+    });
+  },
+
+  processStage46Queue(limit = 5): Promise<{
+    ok: true;
+    summary: {
+      processed: number;
+      completed: number;
+      failed: number;
+      waiting_for_approval: number;
+    };
+    metrics: DelegationMetrics;
+  }> {
+    return apiRequest('/api/stage46/queue/process', {
+      method: 'POST',
+      body: { limit },
+    });
+  },
+
+  getStage46Metrics(): Promise<{
+    ok: true;
+    metrics: DelegationMetrics;
+    alerts: DelegationAlertItem[];
+    workers: WorkerHeartbeatItem[];
+  }> {
+    return apiRequest('/api/stage46/metrics');
+  },
+
+  acknowledgeStage46Alert(alertId: string): Promise<{ ok: true; alert_id: string }> {
+    return apiRequest(`/api/stage46/alerts/${encodeURIComponent(alertId)}/ack`, {
+      method: 'POST',
+      body: {},
     });
   },
 

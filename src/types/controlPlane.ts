@@ -526,3 +526,191 @@ export interface UnifiedLogEntry {
   resource_id: string;
   message: string;
 }
+
+// -------------------- Stage 4.6 Department Agents & Multi-Agent Orchestration --------------------
+
+export type DelegationTaskStatus =
+  | 'CREATED'
+  | 'VALIDATING'
+  | 'QUEUED'
+  | 'ASSIGNED'
+  | 'RUNNING'
+  | 'WAITING_FOR_APPROVAL'
+  | 'RETRYING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type Stage46Department =
+  | 'executive'
+  | 'engineering'
+  | 'design'
+  | 'seo'
+  | 'content'
+  | 'analytics'
+  | 'security'
+  | 'qa'
+  | 'support'
+  | 'research';
+
+export interface DepartmentAgentItem {
+  definition: {
+    id: string;
+    name: string;
+    department: Stage46Department;
+    role: string;
+    description: string;
+    capabilities: string[];
+    allowed_actions: string[];
+    allowed_tool_ids: string[];
+    scopes: string[];
+    preferred_model_ids: string[];
+    permitted_autonomy_level: AutonomyLevel;
+    input_schema: string;
+    output_schema: string;
+    timeout_ms: number;
+    max_retries: number;
+    max_delegation_depth: number;
+    max_children: number;
+    allowed_delegate_ids: string[];
+    risk_level: string;
+    requires_model: boolean;
+  };
+  state: {
+    agent_id: string;
+    status: 'active' | 'paused' | 'disabled' | 'retired';
+    health: 'healthy' | 'degraded' | 'offline' | 'unknown';
+    current_task_id: string | null;
+    tasks_completed: number;
+    tasks_failed: number;
+    last_heartbeat_at: string | null;
+    updated_at: string;
+  } | null;
+}
+
+export interface DelegationProjectItem {
+  project_id: string;
+  name: string;
+  objective: string;
+  context: Record<string, unknown>;
+  allowed_agent_ids: string[];
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DelegationTaskItem {
+  task_id: string;
+  project_id: string;
+  parent_task_id: string | null;
+  root_task_id: string;
+  agent_id: string;
+  department: Stage46Department;
+  status: DelegationTaskStatus;
+  action: string;
+  resource_id: string;
+  environment: ExecutionEnvironment;
+  title: string;
+  description: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown> | null;
+  error: { code: string; message: string; retryable: boolean } | null;
+  risk_level: string;
+  approval_id: string | null;
+  approval_required: boolean;
+  depth: number;
+  max_depth: number;
+  retry_count: number;
+  max_retries: number;
+  timeout_ms: number;
+  idempotency_key: string | null;
+  dependencies: string[];
+  child_task_ids: string[];
+  correlation_id: string;
+  cancellation_requested: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DelegationTaskEventItem {
+  event_id: string;
+  task_id: string;
+  event_type: string;
+  from_status: DelegationTaskStatus | null;
+  to_status: DelegationTaskStatus | null;
+  actor_id: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DelegationMetrics {
+  counts: Record<DelegationTaskStatus, number>;
+  active: number;
+  queued: number;
+  waiting_for_approval: number;
+  oldest_queued_age_ms: number | null;
+  total: number;
+}
+
+export interface DelegationAlertItem {
+  alert_id: string;
+  severity: 'info' | 'warning' | 'critical';
+  code: string;
+  message: string;
+  task_id: string | null;
+  agent_id: string | null;
+  worker_id: string | null;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
+export interface WorkerHeartbeatItem {
+  worker_id: string;
+  runtime_type: string;
+  endpoint: string;
+  health: 'healthy' | 'degraded' | 'offline' | 'unknown';
+  active_jobs: number;
+  queue_length: number;
+  latency_ms: number | null;
+  models: string[];
+  last_error: string | null;
+  last_heartbeat_at: string;
+  updated_at: string;
+}
+
+export interface SandboxCapabilitiesItem {
+  selected_provider: string;
+  selected_isolation_level: string | null;
+  os_isolated: boolean;
+  available?: boolean;
+  isolation_disclaimer: string | null;
+  allow_simulated_provider: boolean;
+  runtime_capabilities?: {
+    available?: boolean;
+    runtime?: string;
+    runtime_version?: string | null;
+    image?: string;
+    image_present?: boolean;
+    reasons?: string[];
+  } | null;
+  adapters: Array<{
+    providerId: string;
+    isolationLevel: string;
+    supportsOsIsolation: boolean;
+    isolationDisclaimer: string;
+  }>;
+}
+
+export interface Stage46Overview {
+  agents: DepartmentAgentItem[];
+  projects: DelegationProjectItem[];
+  metrics: DelegationMetrics;
+  recent_tasks: DelegationTaskItem[];
+  recent_events: DelegationTaskEventItem[];
+  alerts: DelegationAlertItem[];
+  workers: WorkerHeartbeatItem[];
+  sandbox: SandboxCapabilitiesItem | null;
+}

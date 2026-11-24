@@ -91,3 +91,27 @@ TEJAURA is structured as a layered, modular operating system where **governance 
 - **Untrusted Model Output:** Completions carry `untrusted_model_output: true` and cannot alter permissions, endpoints, registry entries, or `system.json`.
 - **No Agent Self-Approval or L4 Autonomy:** `ApprovalService` enforces designated-owner identity (`bindDesignatedOwnerId`) and rejects `requested_by === reviewer.actor_id`.
 - **Zero Paid Third-Party AI APIs:** Commercial API hosts are blocked at endpoint validation and omitted from all fallback paths.
+
+
+---
+
+## Stage 4.6 — Isolated Multi-Agent Execution
+
+```text
+Owner (L4) -> /api/stage46/projects -> DelegationEngine
+  -> CEO planner -> validated delegation DAG
+  -> department agents -> policy + audit per task
+  -> Engineering -> AgentSandboxExecutor -> AgentExecutionEngine
+     -> ContainerSandboxAdapter -> Docker (non-root, no network, read-only)
+  -> Content/Security/QA -> approvals -> CEO consolidation
+```
+
+Key modules:
+
+- `agents/` — department definitions, scoped tools, delegation store/engine, sandbox executor, AirLLM worker and pool.
+- `execution/container-sandbox-adapter.ts` and `execution/container-runner.mjs` — real container isolation.
+- `control-plane/db/migrations.ts` — durable delegation, worker heartbeat, alert, and system tables.
+- `control-plane/server/create-control-plane-app.ts` — owner-authenticated `/api/stage46/*` routes and approval routing.
+- `src/components/AIWorkforceView.tsx` — mobile-first workforce control room.
+
+See [STAGE4_6_MULTI_AGENT.md](STAGE4_6_MULTI_AGENT.md) for controls, lifecycle, API, and operational limits.

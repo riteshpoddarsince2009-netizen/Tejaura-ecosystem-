@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tejaura.org/schemas/stage46/review-result.schema.json",
+  "title": "TEJAURA Stage 4.6 Review Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "verdict", "findings", "model_assisted"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "needs_approval", "blocked", "failed"]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "verdict": { "type": "string", "enum": ["pass", "pass_with_findings", "fail"] },
+    "findings": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "code", "message"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["info", "low", "medium", "high", "critical"]
+          },
+          "code": { "type": "string", "minLength": 2, "maxLength": 128 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "recommendation": { "type": "string", "maxLength": 2000 }
+        }
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "met"],
+        "properties": {
+          "criterion": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "met": { "type": "boolean" },
+          "evidence": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    },
+    "model_assisted": { "type": "boolean" },
+    "metadata": { "type": "object" }
+  }
+}

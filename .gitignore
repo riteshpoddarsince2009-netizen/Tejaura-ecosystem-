@@ -48,3 +48,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Stage 4.6 sandbox execution artifacts
+/sandbox/
+.tejaura-sandbox/

@@ -6,6 +6,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { AgentsManagementView } from '../../src/components/AgentsManagementView.tsx';
+import { AIWorkforceView } from '../../src/components/AIWorkforceView.tsx';
 import { ApprovalInboxView } from '../../src/components/ApprovalInboxView.tsx';
 import { AuditCenterView } from '../../src/components/AuditCenterView.tsx';
 import { AuthScreen } from '../../src/components/AuthScreen.tsx';
@@ -381,6 +382,13 @@ describe('Stage 3 — Frontend UI Rendering & Secret Non-Exposure Guard', () => 
     );
     assert.match(agentsHtml, /Agent Management Center/);
     assert.match(agentsHtml, /Engineering Patch Bot/);
+
+    const workforceHtml = renderToStaticMarkup(
+      React.createElement(AIWorkforceView, { onOpenApprovals: () => {} }),
+    );
+    assert.match(workforceHtml, /AI Workforce/);
+    assert.match(workforceHtml, /Department agents/);
+    assert.match(workforceHtml, /Sandbox capabilities are unavailable/);
 
     const sampleProject: ManagedProjectItem = {
       project_id: 'proj_docs',
