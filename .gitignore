@@ -19,7 +19,7 @@ coverage/
 *.secret
 *.vault.json
 *.enc.json
-secrets/
+/secrets/
 credentials*.json
 *service-account*.json
 

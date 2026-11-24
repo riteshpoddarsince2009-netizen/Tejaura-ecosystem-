@@ -77,6 +77,10 @@ export class ApprovalService {
     return this.store.get(approvalId);
   }
 
+  listApprovals(): ApprovalRecord[] {
+    return this.store.listAll();
+  }
+
   requestApproval(input: CreateApprovalRequestInput): ApprovalOperationResult {
     if (
       !input ||

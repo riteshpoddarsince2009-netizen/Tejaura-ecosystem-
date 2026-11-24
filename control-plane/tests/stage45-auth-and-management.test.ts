@@ -408,18 +408,19 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tejaura-s45-mgmt-'));
     const h1 = await startHarness({ stateDir, environment: 'development', clock: clock.now });
 
-    // Local mock worker server returning /health and /v1/models without ever leaking Bearer token
+    // Local mock worker server matching the authenticated AirLLM worker contract.
     const mockWorker = http.createServer((req, res) => {
-      if (req.url === '/health') {
+      if (req.url === '/internal/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', runtime: 'airllm' }));
+        res.end(JSON.stringify({ ok: true, runtime: 'airllm' }));
         return;
       }
-      if (req.url === '/v1/models' || req.url === '/models') {
+      if (req.url === '/internal/models') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
-            data: [{ id: 'qwen2.5-7b-modelscope', loaded: true }],
+            ok: true,
+            models: [{ model_name: 'qwen2.5-7b-modelscope', loaded: true }],
           }),
         );
         return;
@@ -456,6 +457,33 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
       // 9. Unauthenticated request blocked
       const unauthAgents = await reqJson(`${h1.baseUrl}/api/agents`);
       assert.equal(unauthAgents.status, 401);
+
+      // A client-supplied owner_confirmed_l4 flag can never bypass the Approval Inbox.
+      const l4Task = await reqJson(`${h1.baseUrl}/api/tasks`, {
+        method: 'POST',
+        cookie,
+        body: JSON.stringify({
+          title: 'Publish public release',
+          description: 'Verify L4 actions cannot self-confirm from the request body.',
+          action: 'publish:public',
+          resource_id: 'site:tejaura-public',
+          environment: 'production',
+          autonomy_level: 'L4',
+          declared_scopes: ['publish:public'],
+          priority: 50,
+          idempotent_action: true,
+          max_retries: 0,
+          timeout_ms: 10000,
+          input: {},
+          owner_confirmed_l4: true,
+        }),
+      });
+      assert.equal(l4Task.status, 201);
+      assert.equal(
+        (l4Task.data.task as { status: string }).status,
+        'waiting_for_approval',
+      );
+      assert.ok(l4Task.data.approval_id);
 
       // 8 & 9. Agent creation & L4 / self-approval protection
       const rogueL4 = await reqJson(`${h1.baseUrl}/api/agents`, {
@@ -598,24 +626,85 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
       });
       assert.equal(wSecretReject.status, 400);
 
+      const onlineWorkerPayload = {
+        worker_id: 'airllm_local_mock',
+        name: 'Local AirLLM Mock',
+        runtime_type: 'airllm',
+        node_id: 'local_host_airllm',
+        base_url: workerUrl,
+        requires_auth: true,
+        auth_token_env_var: 'TEJAURA_AIRLLM_WORKER_TOKEN',
+        enabled: true,
+      };
+
+      // Restricted runtime actions must enter the real Approval Inbox; the
+      // backend must never auto-approve or fabricate an owner identity.
+      const wOnlineRequest = await reqJson(`${h1.baseUrl}/api/workers`, {
+        method: 'POST',
+        cookie,
+        body: JSON.stringify(onlineWorkerPayload),
+      });
+      assert.equal(wOnlineRequest.status, 202);
+      assert.equal(wOnlineRequest.data.code, 'APPROVAL_REQUIRED');
+      assert.equal(wOnlineRequest.data.requires_approval, true);
+      const onlineApprovalId = (
+        wOnlineRequest.data.approval as { id: string }
+      ).id;
+
+      const approvalsAfterRequest = await reqJson(
+        `${h1.baseUrl}/api/approvals`,
+        { cookie },
+      );
+      const pendingOnlineApproval = (
+        approvalsAfterRequest.data.approvals as Array<{
+          id: string;
+          status: string;
+          reviewed_by: string | null;
+          requested_by: string;
+        }>
+      ).find((a) => a.id === onlineApprovalId);
+      assert.ok(pendingOnlineApproval);
+      assert.equal(pendingOnlineApproval.status, 'pending');
+      assert.equal(pendingOnlineApproval.reviewed_by, null);
+      assert.equal(
+        pendingOnlineApproval.requested_by,
+        'system:management_control_plane',
+      );
+
+      const approveOnline = await reqJson(
+        `${h1.baseUrl}/api/approvals/${encodeURIComponent(onlineApprovalId)}/decide`,
+        {
+          method: 'POST',
+          cookie,
+          body: JSON.stringify({
+            decision: 'approved',
+            reason: 'Owner reviewed the local AirLLM worker endpoint.',
+          }),
+        },
+      );
+      assert.equal(approveOnline.status, 200);
+
       const wOnlineCreate = await reqJson(`${h1.baseUrl}/api/workers`, {
         method: 'POST',
         cookie,
         body: JSON.stringify({
-          worker_id: 'airllm_local_mock',
-          name: 'Local AirLLM Mock',
-          runtime_type: 'airllm',
-          node_id: 'local_host_airllm',
-          base_url: workerUrl,
-          requires_auth: true,
-          auth_token_env_var: 'TEJAURA_AIRLLM_WORKER_TOKEN',
-          enabled: true,
+          ...onlineWorkerPayload,
+          approval_id: onlineApprovalId,
         }),
       });
-      if (wOnlineCreate.status !== 201) {
-        console.log('wOnlineCreate error response:', wOnlineCreate.data);
-      }
       assert.equal(wOnlineCreate.status, 201);
+
+      // A single-use approval cannot be replayed for a second registration.
+      const wOnlineReplay = await reqJson(`${h1.baseUrl}/api/workers`, {
+        method: 'POST',
+        cookie,
+        body: JSON.stringify({
+          ...onlineWorkerPayload,
+          approval_id: onlineApprovalId,
+        }),
+      });
+      assert.equal(wOnlineReplay.status, 403);
+      assert.equal(wOnlineReplay.data.code, 'SINGLE_USE_ALREADY_CONSUMED');
 
       const wProbeOnline = await reqJson(
         `${h1.baseUrl}/api/workers/airllm_local_mock/probe`,
@@ -629,16 +718,44 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
         ),
       );
 
+      const offlineWorkerPayload = {
+        worker_id: 'airllm_offline_box',
+        name: 'Offline GPU Node',
+        runtime_type: 'airllm',
+        node_id: 'local_host_airllm',
+        base_url: 'http://127.0.0.1:59999',
+        enabled: true,
+      };
+
+      const wOfflineRequest = await reqJson(`${h1.baseUrl}/api/workers`, {
+        method: 'POST',
+        cookie,
+        body: JSON.stringify(offlineWorkerPayload),
+      });
+      assert.equal(wOfflineRequest.status, 202);
+      const offlineApprovalId = (
+        wOfflineRequest.data.approval as { id: string }
+      ).id;
+
+      const approveOffline = await reqJson(
+        `${h1.baseUrl}/api/approvals/${encodeURIComponent(offlineApprovalId)}/decide`,
+        {
+          method: 'POST',
+          cookie,
+          body: JSON.stringify({
+            decision: 'approved',
+            reason: 'Owner reviewed the offline GPU worker endpoint.',
+          }),
+        },
+      );
+      assert.equal(approveOffline.status, 200);
+
       const wOfflineCreate = await reqJson(`${h1.baseUrl}/api/workers`, {
         method: 'POST',
         cookie,
         body: JSON.stringify({
-          worker_id: 'airllm_offline_box',
-          name: 'Offline GPU Node',
-          runtime_type: 'airllm',
-          node_id: 'local_host_airllm',
-          base_url: 'http://127.0.0.1:59999',
-          enabled: true,
+          ...offlineWorkerPayload,
+          approval_id: offlineApprovalId,
         }),
       });
       assert.equal(wOfflineCreate.status, 201);
@@ -664,7 +781,7 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
       assert.equal(pCreate.status, 201);
       createdProjectId = (pCreate.data.project as { project_id: string }).project_id;
 
-      const pStageDeploy = await reqJson(
+      const pStageRequest = await reqJson(
         `${h1.baseUrl}/api/projects/${encodeURIComponent(createdProjectId)}/deploy`,
         {
           method: 'POST',
@@ -672,10 +789,30 @@ describe('TEJAURA Stage 4.5 — Owner Management Center & Auth Repair', () => {
           body: JSON.stringify({ target_environment: 'staging' }),
         },
       );
-      assert.equal(pStageDeploy.status, 200);
-      assert.equal(pStageDeploy.data.requires_approval, false);
+      assert.equal(pStageRequest.status, 200);
+      assert.equal(pStageRequest.data.requires_approval, true);
       assert.equal(
-        (pStageDeploy.data.project as { deployment_status: string }).deployment_status,
+        (pStageRequest.data.project as { deployment_status: string }).deployment_status,
+        'pending_approval',
+      );
+      const stagingApprovalId = (
+        pStageRequest.data.approval as { id: string }
+      ).id;
+
+      const stageApprove = await reqJson(
+        `${h1.baseUrl}/api/approvals/${encodeURIComponent(stagingApprovalId)}/decide`,
+        {
+          method: 'POST',
+          cookie,
+          body: JSON.stringify({
+            decision: 'approved',
+            reason: 'Owner approved the staging deployment after local checks.',
+          }),
+        },
+      );
+      assert.equal(stageApprove.status, 200);
+      assert.equal(
+        (stageApprove.data.project as { deployment_status: string }).deployment_status,
         'deployed',
       );
 

@@ -31,7 +31,6 @@ export interface SubmitTaskInput {
   timeout_ms?: number;
   input: Record<string, unknown>;
   assigned_agent_id?: string | null;
-  owner_confirmed_l4?: boolean;
   schedule_id?: string | null;
 }
 

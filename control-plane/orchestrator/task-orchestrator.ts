@@ -252,7 +252,6 @@ export class TaskOrchestrator {
       resource: { id: candidateRecord.resource_id, type: 'task' },
       environment: candidateRecord.environment,
       declared_scopes: candidateRecord.declared_scopes,
-      owner_confirmed_l4: input.owner_confirmed_l4,
       system_config: this.systemConfig,
       audit_logger: this.auditLogger,
       correlation_id: ctx.correlation_id,

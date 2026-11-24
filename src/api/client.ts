@@ -34,12 +34,23 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly mfaRequired?: boolean;
+  readonly approvalId?: string;
+  readonly requiresApproval?: boolean;
 
-  constructor(status: number, code: string, message: string, mfaRequired?: boolean) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    mfaRequired?: boolean,
+    approvalId?: string,
+    requiresApproval?: boolean,
+  ) {
     super(message);
     this.status = status;
     this.code = code;
     this.mfaRequired = mfaRequired;
+    this.approvalId = approvalId;
+    this.requiresApproval = requiresApproval;
   }
 }
 
@@ -66,6 +77,7 @@ async function apiRequest<T>(
 
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok || data.ok === false) {
+    const approval = data.approval as { id?: unknown } | undefined;
     throw new ApiError(
       res.status,
       typeof data.code === 'string' ? data.code : 'REQUEST_FAILED',
@@ -73,6 +85,8 @@ async function apiRequest<T>(
         ? data.error
         : `Control plane request failed with HTTP ${res.status}.`,
       data.mfa_required === true,
+      typeof approval?.id === 'string' ? approval.id : undefined,
+      data.requires_approval === true,
     );
   }
 
@@ -175,7 +189,6 @@ export const controlPlaneApi = {
     max_retries: number;
     timeout_ms: number;
     input: Record<string, unknown>;
-    owner_confirmed_l4?: boolean;
   }): Promise<{
     ok: true;
     duplicate: boolean;
@@ -520,6 +533,7 @@ export const controlPlaneApi = {
     requires_auth?: boolean;
     auth_token_env_var?: string | null;
     enabled?: boolean;
+    approval_id?: string;
   }): Promise<{ ok: true; worker: ManagedWorkerItem }> {
     return apiRequest('/api/workers', { method: 'POST', body: input });
   },
@@ -527,10 +541,11 @@ export const controlPlaneApi = {
   toggleWorker(
     workerId: string,
     enabled: boolean,
+    approvalId?: string,
   ): Promise<{ ok: true; worker: ManagedWorkerItem }> {
     return apiRequest(`/api/workers/${encodeURIComponent(workerId)}/toggle`, {
       method: 'POST',
-      body: { enabled },
+      body: { enabled, ...(approvalId ? { approval_id: approvalId } : {}) },
     });
   },
 
@@ -541,10 +556,17 @@ export const controlPlaneApi = {
     });
   },
 
-  deleteWorker(workerId: string): Promise<{ ok: true; worker_id: string }> {
-    return apiRequest(`/api/workers/${encodeURIComponent(workerId)}`, {
-      method: 'DELETE',
-    });
+  deleteWorker(
+    workerId: string,
+    approvalId?: string,
+  ): Promise<{ ok: true; worker_id: string }> {
+    const query = approvalId
+      ? `?approval_id=${encodeURIComponent(approvalId)}`
+      : '';
+    return apiRequest(
+      `/api/workers/${encodeURIComponent(workerId)}${query}`,
+      { method: 'DELETE' },
+    );
   },
 
   // -------------------- Stage 4.5 Project & Website Management --------------------
@@ -605,8 +627,7 @@ export const controlPlaneApi = {
     input: {
       target_environment?: ExecutionEnvironment;
       notes?: string;
-      owner_confirmed_l4?: boolean;
-    },
+      },
   ): Promise<{
     ok: true;
     project: ManagedProjectItem;

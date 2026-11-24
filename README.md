@@ -1,7 +1,7 @@
 # TEJAURA
 
-> **Status:** Stage 4 Foundation — Governance, AirLLM Local Inference, Private Auth, Persistent Control Plane & Sandboxed Agent Execution Engine Implemented (Pre-Alpha)  
-> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/`), Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`), and Stage 4 Sandboxed Agent Execution Foundation (`execution/`, SQLite v2 execution jobs & logs, `MockSandboxAdapter`). OS-level `isolated_container` sandboxing, concrete department agents, physical GPU verification, and Stage 5 integrations remain **pending**.
+> **Status:** Stage 4.5 — Owner Management Center, Authentication Repair & Security Audit Implemented (Pre-Alpha)
+> **Implementation Scope:** Implemented today: governance specifications, system/registry config validators, Core Contracts (`contracts/`), deterministic Policy Evaluator (`L0`–`L4`), Approval Gatekeeper, append-only JSONL Audit Logger, Stage 2/2A AirLLM-primary Local Model Infrastructure (`intelligence/`, `workers/airllm/`), Stage 2B Private Identity/Auth/RBAC/Secrets Foundation (`core/`), Stage 3 SQLite Task Orchestrator + Express Control Plane API + Mobile-First React UI (`control-plane/`, `server.ts`, `src/`), Stage 4 Sandboxed Agent Execution Foundation (`execution/`, SQLite v2 execution jobs & logs, `MockSandboxAdapter`), and Stage 4.5 Owner Management Center with transport-safe auth, approval-gated runtime/project mutations, persistent agent/model/worker/project administration, backups, and audit inspection. OS-level `isolated_container` sandboxing, concrete department agents, physical GPU verification, and Stage 5 integrations remain **pending**.
 
 TEJAURA is a human-governed, modular AI operating system designed to be **open-source-first**, **model-provider agnostic**, **phone-first**, and **free-first**.
 
@@ -47,6 +47,12 @@ To avoid ambiguity, TEJAURA strictly separates automated-test-verified capabilit
 - **Stage 4 Sandboxed Agent Execution Foundation (`execution/`, `control-plane/db/`, `control-plane/server/`):**
   - **Execution Engine & Persistence:** Converts approved agent tasks into persistent SQLite execution jobs (`queued`, `running`, `completed`, `failed`, `cancelled`) and structured secret-redacted logs (`002_stage4_agent_execution`), with timeouts, owner-only cancellation, bounded retries, idempotency keys, and restart recovery.
   - **Default-Deny Sandbox Policy & Mock Adapter:** `Agent`/`Tool` contract validation, workspace path allowlists, shell blocking, unrestricted network/browser denial, `ApprovalService` gating, and `MockSandboxAdapter` (`supportsOsIsolation: false` — dev/test simulation only).
+
+- **Stage 4.5 Owner Management Center, Authentication Repair & Security Audit (`control-plane/management/`, `src/`, `core/secrets/`):**
+  - **Transport-Safe Auth:** `https_direct`, `https_embedded_iframe` (CHIPS partitioned cookies), and strictly loopback-only `http_loopback_dev` session modes; multi-hop proxy-aware CSRF origin checks; post-login cookie verification; TOTP whitespace normalization.
+  - **Owner Management Modules:** Persistent SQLite v3 records for agents, models, workers, projects, system config, and backups, exposed through owner-authenticated management APIs and a mobile-first management UI.
+  - **Approval-Gated Runtime & Deployment Actions:** Worker registration/toggle/delete and staging/production project deploys create real `ApprovalService` requests and execute only after a separate owner decision. Client-supplied L4 confirmation flags are ignored; L4 tasks always enter the Approval Inbox.
+  - **Security Repairs:** Removed fabricated owner auto-approval paths, added startup-only rehydration for persisted models/endpoints without minting approvals, and made encrypted vault writes atomic with strict entry validation.
 
 ### Planned / Not Yet Hardware- or Deployment-Verified
 - **Remaining Stage 4:** OS-level `isolated_container` `SandboxAdapter`, concrete department agents (`research`, `engineering`, `seo`, `design`, `content`, `analytics`, `customer_support`), dry-run diffs, and execution job UI tabs.

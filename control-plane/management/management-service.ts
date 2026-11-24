@@ -87,6 +87,8 @@ const VALID_ENVIRONMENTS = new Set<ExecutionEnvironment>([
   'production',
 ]);
 
+const MANAGEMENT_EXECUTOR_ID = 'system:management_control_plane';
+
 const VALID_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$/;
 const VALID_ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]{2,63}$/;
 const SECRET_FIELD_PATTERN =
@@ -107,6 +109,8 @@ export interface ManagementError {
   code: string;
   error: string;
   http_status: number;
+  /** Present when a restricted action is waiting for a real owner decision. */
+  approval?: ApprovalRecord;
 }
 
 export type ManagementOutcome<T> = ManagementResult<T> | ManagementError;
@@ -249,48 +253,109 @@ export class ManagementService {
     this.clock = options.clock ?? (() => new Date());
   }
 
-  private ensureOwnerApprovedRuntimeAction(
-    action: string,
-    resourceId: string,
-    requiredScope: string,
-    ctx: ManagementActorContext,
-  ): Approval | null {
-    try {
-      const approvals = this.approvalsProvider();
+  private managementExecutor(): PolicyActor {
+    return {
+      id: MANAGEMENT_EXECUTOR_ID,
+      type: 'system',
+      trusted_autonomy_level: 'L3',
+      trusted_authenticated: true,
+    };
+  }
+
+  private runtimeApprovalTaskId(resourceId: string): string {
+    return `${MANAGEMENT_EXECUTOR_ID}:${resourceId}`.slice(0, 128);
+  }
+
+  /**
+   * Restricted runtime actions are authorized only by a real owner decision
+   * recorded in the Approval Inbox. Without an approval id we create a pending
+   * request and stop; we never fabricate an owner or decide on the owner's behalf.
+   */
+  private obtainRuntimeApproval(params: {
+    resourceId: string;
+    requiredScope: string;
+    approvalId?: string;
+    ctx: ManagementActorContext;
+  }): { ok: true; approval: Approval } | ManagementError {
+    const approvals = this.approvalsProvider();
+    const taskId = this.runtimeApprovalTaskId(params.resourceId);
+
+    if (!params.approvalId) {
+      const existingPending = approvals
+        .listApprovals()
+        .find(
+          (record) =>
+            record.task_id === taskId &&
+            record.action === 'runtime:manage' &&
+            record.status === 'pending' &&
+            record.scope.resources.includes(params.resourceId) &&
+            record.scope.permissions.includes(params.requiredScope),
+        );
+      if (existingPending) {
+        return {
+          ok: false,
+          code: 'APPROVAL_REQUIRED',
+          error:
+            'Owner approval is required before this runtime action can proceed. Approve it in the Owner Approval Inbox and retry with approval_id.',
+          http_status: 202,
+          approval: existingPending,
+        };
+      }
+
       const reqRes = approvals.requestApproval({
-        task_id: `sys_mgmt_${crypto.randomUUID().slice(0, 8)}`,
-        action,
-        requested_by: 'system:admin_daemon',
-        reason: `Owner management action "${action}" for resource "${resourceId}".`,
+        task_id: taskId,
+        action: 'runtime:manage',
+        requested_by: MANAGEMENT_EXECUTOR_ID,
+        reason: `Owner approval requested for runtime action on "${params.resourceId}".`,
         scope: {
-          resources: [resourceId],
-          permissions: [requiredScope],
+          resources: [params.resourceId],
+          permissions: [params.requiredScope],
           single_use: true,
-          expires_at: new Date(this.clock().getTime() + 60 * 60 * 1000).toISOString(),
+          expires_at: new Date(
+            this.clock().getTime() + 60 * 60 * 1000,
+          ).toISOString(),
         },
         environment: 'local',
-        correlation_id: ctx.correlation_id,
+        correlation_id: params.ctx.correlation_id,
       });
-      console.log('ensureOwnerApprovedRuntimeAction reqRes:', reqRes);
-      if (!reqRes.ok) return null;
-
-      const decideRes = approvals.decideApproval({
-        approval_id: reqRes.record.id,
-        decision: 'approved',
-        reviewer: {
-          actor_id: 'owner:sovereign',
-          actor_type: 'owner',
-          authenticated: true,
-          auth_source: 'tejaura-owner-session',
-        },
-        reason: 'Auto-approved owner management action.',
-        correlation_id: ctx.correlation_id,
-      });
-      console.log('ensureOwnerApprovedRuntimeAction decideRes:', decideRes);
-      return decideRes.ok ? toContractApproval(decideRes.record) : null;
-    } catch {
-      return null;
+      if (!reqRes.ok) {
+        return {
+          ok: false,
+          code: reqRes.code,
+          error: reqRes.error,
+          http_status: 400,
+        };
+      }
+      return {
+        ok: false,
+        code: 'APPROVAL_REQUIRED',
+        error:
+          'Owner approval is required before this runtime action can proceed. Approve it in the Owner Approval Inbox and retry with approval_id.',
+        http_status: 202,
+        approval: reqRes.record,
+      };
     }
+
+    const consumed = approvals.verifyAndConsumeApproval({
+      approval_id: params.approvalId,
+      task_id: taskId,
+      action: 'runtime:manage',
+      resource_id: params.resourceId,
+      required_scope: params.requiredScope,
+      environment: 'local',
+      actor_id: MANAGEMENT_EXECUTOR_ID,
+      correlation_id: params.ctx.correlation_id,
+    });
+    if (!consumed.ok) {
+      return {
+        ok: false,
+        code: consumed.code,
+        error: consumed.error,
+        http_status: 403,
+      };
+    }
+
+    return { ok: true, approval: toContractApproval(consumed.record) };
   }
 
   private assertOwnerMutation(
@@ -400,30 +465,33 @@ export class ManagementService {
       }
     }
 
-    const ownerActor: PolicyActor = {
-      id: 'system_bootstrap_sync',
-      type: 'owner',
-      trusted_autonomy_level: 'L4',
-      trusted_authenticated: true,
-    };
-
-    for (const dbModel of dbModelMap.values()) {
-      if (!this.registry.getModel(dbModel.model_id)) {
-        this.registry.registerModel(
-          this.toLocalModelEntry(dbModel),
-          {
-            actor: ownerActor,
-            declared_scopes: ['model:registry:write'],
-            system_config: this.systemConfig,
-            audit_logger: this.auditLogger,
-            correlation_id: 'corr_bootstrap_model_sync',
-          },
-        );
-      }
+    // Rehydrate models that were persisted only after an authenticated owner
+    // mutation. This startup path never creates an owner identity or approval.
+    const missingModels = [...dbModelMap.values()].filter(
+      (m) => !this.registry.getModel(m.model_id),
+    );
+    if (missingModels.length > 0) {
+      const restore = this.registry.restorePersistedModels(
+        missingModels.map((m) => this.toLocalModelEntry(m)),
+      );
+      this.auditLogger.logEvent({
+        actor_type: 'system',
+        actor_id: 'system:persistence_sync',
+        event_type: 'model.registry.rehydrated',
+        resource_type: 'model',
+        resource_id: 'model_registry',
+        action: 'model:registry_rehydrate',
+        outcome: restore.rejected.length === 0 ? 'success' : 'failure',
+        correlation_id: 'corr_bootstrap_model_sync',
+        metadata: {
+          restored: restore.restored,
+          rejected: restore.rejected,
+        },
+      });
     }
 
     // 2. Seed initial TrustedEndpoints from RuntimeManager into SQLite if missing,
-    // and push SQLite workers into RuntimeManager.
+    // and rehydrate persisted workers without fabricating owner approval.
     const dbWorkers = this.store.listManagedWorkers({ limit: 250 }).items;
     const dbWorkerMap = new Map(dbWorkers.map((w) => [w.worker_id, w]));
 
@@ -453,39 +521,54 @@ export class ManagementService {
       }
     }
 
-    for (const w of dbWorkerMap.values()) {
-      const existing = this.runtime
-        .listTrustedEndpoints()
-        .find((ep) => ep.endpoint_id === w.worker_id);
-      if (!existing && VALID_RUNTIME_TYPES.has(w.runtime_type as LocalRuntimeType)) {
-        const approvalRecord = this.ensureOwnerApprovedRuntimeAction(
-          'runtime:manage',
-          `runtime:${w.worker_id}`,
-          'runtime:manage:approved',
-          { actor: ownerActor, correlation_id: 'corr_bootstrap_worker_sync' },
-        );
-        this.runtime.registerTrustedEndpoint(
-          {
-            endpoint_id: w.worker_id,
-            runtime_type: w.runtime_type as LocalRuntimeType,
-            base_url: w.base_url,
-            node_id: w.node_id,
-            enabled: w.enabled,
-            requires_auth: w.requires_auth,
-            auth_token_env_var: w.auth_token_env_var ?? undefined,
-          },
-          {
-            actor: ownerActor,
-            environment: 'local' as const,
-            owner_confirmed_l4: true,
-            declared_scopes: ['runtime:manage:approved'],
-            approval: approvalRecord ?? undefined,
-            system_config: this.systemConfig,
-            audit_logger: this.auditLogger,
-            correlation_id: 'corr_bootstrap_worker_sync',
-          },
-        );
+    const knownEndpoints = new Set(
+      this.runtime.listTrustedEndpoints().map((ep) => ep.endpoint_id),
+    );
+    const workersToRestore = [...dbWorkerMap.values()].filter(
+      (w) =>
+        !knownEndpoints.has(w.worker_id) &&
+        VALID_RUNTIME_TYPES.has(w.runtime_type as LocalRuntimeType),
+    );
+
+    if (workersToRestore.length > 0) {
+      const restore = this.runtime.restorePersistedEndpoints(
+        workersToRestore.map((w) => ({
+          endpoint_id: w.worker_id,
+          runtime_type: w.runtime_type as LocalRuntimeType,
+          base_url: w.base_url,
+          node_id: w.node_id,
+          enabled: w.enabled,
+          requires_auth: w.requires_auth,
+          auth_token_env_var: w.auth_token_env_var ?? undefined,
+        })),
+      );
+
+      for (const rejection of restore.rejected) {
+        const worker = dbWorkerMap.get(rejection.endpoint_id);
+        if (worker) {
+          this.store.saveManagedWorker({
+            ...worker,
+            health_status: 'offline',
+            last_error: `Persisted endpoint could not be restored: ${rejection.error}`,
+            updated_at: nowIso,
+          });
+        }
       }
+
+      this.auditLogger.logEvent({
+        actor_type: 'system',
+        actor_id: 'system:persistence_sync',
+        event_type: 'runtime.endpoints.rehydrated',
+        resource_type: 'system',
+        resource_id: 'runtime_manager',
+        action: 'runtime:rehydrate',
+        outcome: restore.rejected.length === 0 ? 'success' : 'failure',
+        correlation_id: 'corr_bootstrap_worker_sync',
+        metadata: {
+          restored: restore.restored,
+          rejected: restore.rejected,
+        },
+      });
     }
   }
 
@@ -1406,6 +1489,7 @@ export class ManagementService {
     rawInput: Record<string, unknown>,
     ctx: ManagementActorContext,
     existingWorkerId?: string,
+    approvalId?: string,
   ): ManagementOutcome<ManagedWorkerRecord> {
     const authErr = this.assertOwnerMutation(
       ctx,
@@ -1526,18 +1610,22 @@ export class ManagementService {
       auth_token_env_var: authTokenEnvVar ?? undefined,
     };
 
-    const approvalRecord = this.ensureOwnerApprovedRuntimeAction(
-      'runtime:manage',
-      `runtime:${workerId}`,
-      'runtime:manage:approved',
+    const approvalOutcome = this.obtainRuntimeApproval({
+      resourceId: `runtime:${workerId}`,
+      requiredScope: 'runtime:manage:approved',
+      approvalId,
       ctx,
-    );
+    });
+    if (!approvalOutcome.ok) {
+      return approvalOutcome;
+    }
+
     const regRes = this.runtime.registerTrustedEndpoint(endpoint, {
-      actor: ctx.actor,
+      actor: this.managementExecutor(),
       environment: 'local' as const,
-      owner_confirmed_l4: true,
       declared_scopes: ['runtime:manage:approved'],
-      approval: approvalRecord ?? undefined,
+      approval: approvalOutcome.approval,
+      now: this.clock(),
       system_config: this.systemConfig,
       audit_logger: this.auditLogger,
       correlation_id: ctx.correlation_id,
@@ -1581,6 +1669,7 @@ export class ManagementService {
     workerId: string,
     enabled: boolean,
     ctx: ManagementActorContext,
+    approvalId?: string,
   ): ManagementOutcome<ManagedWorkerRecord> {
     const authErr = this.assertOwnerMutation(ctx, 'runtime:manage', 'system', workerId);
     if (authErr) return authErr;
@@ -1595,18 +1684,22 @@ export class ManagementService {
       };
     }
 
-    const approvalRecord = this.ensureOwnerApprovedRuntimeAction(
-      'runtime:manage',
-      `runtime:${workerId}`,
-      'runtime:manage:approved',
+    const approvalOutcome = this.obtainRuntimeApproval({
+      resourceId: `runtime:${workerId}`,
+      requiredScope: 'runtime:manage:approved',
+      approvalId,
       ctx,
-    );
+    });
+    if (!approvalOutcome.ok) {
+      return approvalOutcome;
+    }
+
     const toggleRes = this.runtime.setTrustedEndpointEnabled(workerId, enabled, {
-      actor: ctx.actor,
+      actor: this.managementExecutor(),
       environment: 'local' as const,
-      owner_confirmed_l4: true,
       declared_scopes: ['runtime:manage:approved'],
-      approval: approvalRecord ?? undefined,
+      approval: approvalOutcome.approval,
+      now: this.clock(),
       system_config: this.systemConfig,
       audit_logger: this.auditLogger,
       correlation_id: ctx.correlation_id,
@@ -1631,6 +1724,7 @@ export class ManagementService {
   deleteWorker(
     workerId: string,
     ctx: ManagementActorContext,
+    approvalId?: string,
   ): ManagementOutcome<{ worker_id: string }> {
     const authErr = this.assertOwnerMutation(ctx, 'runtime:manage', 'system', workerId);
     if (authErr) return authErr;
@@ -1645,22 +1739,34 @@ export class ManagementService {
       };
     }
 
-    const approvalRecord = this.ensureOwnerApprovedRuntimeAction(
-      'runtime:manage',
-      `runtime:${workerId}`,
-      'runtime:manage:approved',
+    const approvalOutcome = this.obtainRuntimeApproval({
+      resourceId: `runtime:${workerId}`,
+      requiredScope: 'runtime:manage:approved',
+      approvalId,
       ctx,
-    );
-    this.runtime.removeTrustedEndpoint(workerId, {
-      actor: ctx.actor,
+    });
+    if (!approvalOutcome.ok) {
+      return approvalOutcome;
+    }
+
+    const removeRes = this.runtime.removeTrustedEndpoint(workerId, {
+      actor: this.managementExecutor(),
       environment: 'local' as const,
-      owner_confirmed_l4: true,
       declared_scopes: ['runtime:manage:approved'],
-      approval: approvalRecord ?? undefined,
+      approval: approvalOutcome.approval,
+      now: this.clock(),
       system_config: this.systemConfig,
       audit_logger: this.auditLogger,
       correlation_id: ctx.correlation_id,
     });
+    if (!removeRes.ok) {
+      return {
+        ok: false,
+        code: removeRes.code ?? 'RUNTIME_REMOVE_FAILED',
+        error: removeRes.error ?? 'Unknown error',
+        http_status: 400,
+      };
+    }
     this.store.deleteManagedWorker(workerId);
     return { ok: true, data: { worker_id: workerId } };
   }
@@ -1997,7 +2103,6 @@ export class ManagementService {
       target_environment?: ExecutionEnvironment;
       notes?: string;
       approval_id?: string;
-      owner_confirmed_l4?: boolean;
     },
     ctx: ManagementActorContext,
   ): ManagementOutcome<{
@@ -2031,86 +2136,66 @@ export class ManagementService {
     const nowIso = this.clock().toISOString();
     const approvals = this.approvalsProvider();
     const action = targetEnv === 'production' ? 'deploy:production' : 'deploy:staging';
+    const requiredScope = action;
 
-    if (targetEnv === 'production') {
-      const policy = evaluatePolicyWithAudit({
-        actor: ctx.actor,
-        action: 'deploy:production',
-        resource: { id: `project:${projectId}`, type: 'system' },
-        environment: 'production',
-        declared_scopes: ['deploy:production'],
-        owner_confirmed_l4: params.owner_confirmed_l4 === true || Boolean(params.approval_id),
-        system_config: this.systemConfig,
-        audit_logger: this.auditLogger,
-        correlation_id: ctx.correlation_id,
-      });
+    if (targetEnv === 'production' || targetEnv === 'staging') {
+      if (!params.approval_id) {
+        const existingPending = approvals
+          .listApprovals()
+          .find(
+            (record) =>
+              record.task_id === projectId &&
+              record.action === action &&
+              record.status === 'pending' &&
+              record.scope.resources.includes(`project:${projectId}`) &&
+              record.scope.permissions.includes(requiredScope),
+          );
 
-      if (!policy.allowed && policy.decision !== 'require_approval') {
-        return {
-          ok: false,
-          code: policy.reason_code,
-          error: policy.reason,
-          http_status: 403,
-        };
-      }
-
-      if (params.approval_id) {
-        const consumed = approvals.verifyAndConsumeApproval({
-          approval_id: params.approval_id,
-          task_id: projectId,
-          action: 'deploy:production',
-          actor_id: ctx.actor.id,
-          resource_id: `project:${projectId}`,
-          required_scope: 'deploy:production',
-          environment: 'production',
-          correlation_id: ctx.correlation_id,
-        });
-        if (!consumed.ok) {
-          return {
-            ok: false,
-            code: consumed.code,
-            error: consumed.error,
-            http_status: 403,
-          };
-        }
-      } else {
-        const expiresAt = new Date(this.clock().getTime() + 24 * 60 * 60 * 1000).toISOString();
-        const reqRes = approvals.requestApproval({
-          task_id: projectId,
-          action: 'deploy:production',
-          requested_by: ctx.actor.id,
-          reason:
-            params.notes?.trim() ||
-            `Production deployment requested for project "${existing.name}" (${existing.slug}).`,
-          scope: {
-            resources: [`project:${projectId}`],
-            permissions: ['deploy:production'],
-            single_use: true,
-            expires_at: expiresAt,
-          },
-          environment: 'production',
-          correlation_id: ctx.correlation_id,
-        });
-        if (!reqRes.ok) {
-          return {
-            ok: false,
-            code: reqRes.code,
-            error: reqRes.error,
-            http_status: 400,
-          };
+        let pendingApproval: ApprovalRecord;
+        if (existingPending) {
+          pendingApproval = existingPending;
+        } else {
+          const expiresAt = new Date(
+            this.clock().getTime() + 24 * 60 * 60 * 1000,
+          ).toISOString();
+          const reqRes = approvals.requestApproval({
+            task_id: projectId,
+            action,
+            requested_by: MANAGEMENT_EXECUTOR_ID,
+            reason:
+              params.notes?.trim() ||
+              `${targetEnv} deployment requested for project "${existing.name}" (${existing.slug}).`,
+            scope: {
+              resources: [`project:${projectId}`],
+              permissions: [requiredScope],
+              single_use: true,
+              expires_at: expiresAt,
+            },
+            environment: targetEnv,
+            correlation_id: ctx.correlation_id,
+          });
+          if (!reqRes.ok) {
+            return {
+              ok: false,
+              code: reqRes.code,
+              error: reqRes.error,
+              http_status: 400,
+            };
+          }
+          pendingApproval = reqRes.record;
         }
 
         const pendingProject = this.store.saveManagedProject({
           ...existing,
-          environment: 'production',
+          environment: targetEnv,
           deployment_status: 'pending_approval',
-          pending_approval_id: reqRes.record.id,
+          pending_approval_id: pendingApproval.id,
           recent_changes: [
             {
               change_id: `chg_${crypto.randomUUID().slice(0, 8)}`,
-              summary: `Production deployment queued for owner approval (${reqRes.record.id}).`,
+              summary: `${targetEnv} deployment queued for owner approval (${pendingApproval.id}).`,
               actor_id: ctx.actor.id,
-              environment: 'production' as ExecutionEnvironment,
+              environment: targetEnv,
               created_at: nowIso,
             },
             ...existing.recent_changes,
@@ -2123,8 +2208,50 @@ export class ManagementService {
           data: {
             project: pendingProject,
             requires_approval: true,
-            approval: reqRes.record,
+            approval: pendingApproval,
           },
+        };
+      }
+
+      const consumed = approvals.verifyAndConsumeApproval({
+        approval_id: params.approval_id,
+        task_id: projectId,
+        action,
+        actor_id: MANAGEMENT_EXECUTOR_ID,
+        resource_id: `project:${projectId}`,
+        required_scope: requiredScope,
+        environment: targetEnv,
+        correlation_id: ctx.correlation_id,
+      });
+      if (!consumed.ok) {
+        return {
+          ok: false,
+          code: consumed.code,
+          error: consumed.error,
+          http_status: 403,
+        };
+      }
+
+      const contractApproval = toContractApproval(consumed.record);
+      const policy = evaluatePolicyWithAudit({
+        actor: targetEnv === 'production' ? ctx.actor : this.managementExecutor(),
+        action,
+        resource: { id: `project:${projectId}`, type: 'system' },
+        environment: targetEnv,
+        declared_scopes: [requiredScope],
+        approval: targetEnv === 'production' ? null : contractApproval,
+        owner_confirmed_l4: targetEnv === 'production' ? true : undefined,
+        now: this.clock(),
+        system_config: this.systemConfig,
+        audit_logger: this.auditLogger,
+        correlation_id: ctx.correlation_id,
+      });
+      if (!policy.allowed) {
+        return {
+          ok: false,
+          code: policy.reason_code,
+          error: policy.reason,
+          http_status: 403,
         };
       }
     }
@@ -2212,14 +2339,27 @@ export class ManagementService {
     let updatedProject: ManagedProjectRecord;
 
     if (params.decision === 'approved') {
+      const requiredScope = res.record.scope.permissions[0];
+      const environment = res.record.environment as ExecutionEnvironment;
+      if (!requiredScope || !environment) {
+        return {
+          ok: false,
+          code: 'INVALID_APPROVAL_SCOPE',
+          error: 'Deployment approval is missing its bound scope or environment.',
+          http_status: 400,
+        };
+      }
+
+      // Execution is performed by the control-plane requester, never by the
+      // reviewing owner, so approval reviewer/executor separation is preserved.
       const consumed = approvals.verifyAndConsumeApproval({
         approval_id: res.record.id,
         task_id: project.project_id,
         action: res.record.action,
-        actor_id: params.reviewer.actor_id,
+        actor_id: res.record.requested_by,
         resource_id: `project:${project.project_id}`,
-        required_scope: 'deploy:production',
-        environment: res.record.environment as ExecutionEnvironment,
+        required_scope: requiredScope,
+        environment,
         correlation_id: params.correlation_id,
       });
       if (!consumed.ok) {
@@ -2232,6 +2372,7 @@ export class ManagementService {
       }
       updatedProject = this.store.saveManagedProject({
         ...project,
+        environment,
         deployment_status: 'deployed',
         health_status: 'healthy',
         pending_approval_id: null,
@@ -2239,9 +2380,9 @@ export class ManagementService {
         recent_changes: [
           {
             change_id: `chg_${crypto.randomUUID().slice(0, 8)}`,
-            summary: `Production deployment approved & released (${res.record.id}): ${params.reason}`,
+            summary: `${environment} deployment approved & released (${res.record.id}): ${params.reason}`,
             actor_id: params.reviewer.actor_id,
-            environment: 'production' as ExecutionEnvironment,
+            environment,
             created_at: nowIso,
           },
           ...project.recent_changes,
